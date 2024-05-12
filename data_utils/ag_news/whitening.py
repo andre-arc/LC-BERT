@@ -203,7 +203,7 @@ class BertWhiteningDataset(Dataset):
             elif pooling == 'cls':
                 output_hidden_state = (hidden_states[-1])[:, 0, :]
             else:
-                raise Exception("unknown pooling {}".format(POOLING))
+                raise Exception("unknown pooling {}".format(pooling))
             
 
             vec = output_hidden_state.cpu().numpy()[0]

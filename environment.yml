@@ -1,0 +1,22 @@
+name: lc-bert-pytorch
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pandas
+  - numpy
+  - scikit-learn
+  - matplotlib
+  - jupyter
+  - tqdm
+  - nltk
+  - ipykernel
+  - ipython
+  - seaborn
+  - scipy=1.10.1
+  - pip
+  - pip:
+    - gensim
+    - transformers
+    - sentencepiece
+    - tokenizers
