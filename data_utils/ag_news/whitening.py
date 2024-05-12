@@ -112,16 +112,25 @@ class BertWhiteningDataset(Dataset):
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
         
-        # Apply PCA
-        pca = PCA()
-        pca.fit(vecs)
+        # Center the data
+        centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
+        
+        # Covariance matrix estimation
+        covariance_matrix = np.cov(centered_vecs.T, rowvar=True, bias=True)
 
-        # Obtain the transformation matrix W
-        W = pca.components_.T
+        # Calculate Eigenvalues and Eigenvectors
+        w, v = np.linalg.eig(covariance_matrix)
+
+        # Create a diagonal matrix
+        diagw = np.diag(1/((w+.1e-5)**0.5))
+        diagw = diagw.real.round(4)
+
+        # pca_matrix = np.dot(diagw, v.T)
+        pca_matrix = np.dot(np.dot(diagw, v.T), mu.T)
 
         # Invert and transpose W
         # W = np.linalg.inv(W.T)
-        return W, -mu
+        return pca_matrix, -mu
     
     def _compute_kernel_bias_zca(self, vecs):
         vecs = np.concatenate(vecs, axis=0)
@@ -166,7 +175,8 @@ class BertWhiteningDataset(Dataset):
         diagw = diagw.real.round(4)
 
         # Whitening transformation matrix
-        zca_matrix = np.dot(np.dot(v, diagw), v.T)
+        # zca_matrix = np.dot(np.dot(v, diagw), v.T)
+        zca_matrix = np.dot(np.dot(np.dot(v, diagw), v.T), mu.T)
 
         # Return ZCA whitening matrix and mean
         return zca_matrix, -mu
