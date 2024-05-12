@@ -53,19 +53,21 @@ class MLPForWordClassification(nn.Module):
     def __init__(self, num_classes, input_size, hidden_size):
         super(MLPForWordClassification, self).__init__()
 
-        self.dropout = nn.Dropout(0.1)
-        self.classifier = nn.Linear(input_size, num_classes)
+        self.classifier = nn.Sequential(
+            nn.Dropout(0.1),
+            nn.Linear(input_size, num_classes),
+            # nn.Softmax(dim=1)
+        )
         # self.classifier = nn.Linear(input_size, num_classes)
         # self.dropout = nn.Dropout()
 
         self.num_classes = num_classes
 
     def forward(self, vector, labels):
-        pooled_output = self.dropout(vector)
-        logits = self.classifier(pooled_output)
+        logits = self.classifier(vector)
+        logits = torch.squeeze(logits)
         outputs = (logits, )
 
-        loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits.view(-1, self.num_classes), labels.view(-1))

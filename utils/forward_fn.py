@@ -69,7 +69,6 @@ def modified_forward_word_classification(model, batch_data, i2w, is_test=False, 
     outputs = model(vector_batch, labels=label_batch)
     loss, logits = outputs[:2]
 
-    
     # generate prediction & label list
     list_hyps = []
     list_labels = []
