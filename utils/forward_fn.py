@@ -74,7 +74,6 @@ def modified_forward_word_classification(model, batch_data, i2w, is_test=False, 
     list_labels = []
     hyps_list = torch.argmax(logits, dim=-1).tolist()
 
-
     for i in range(len(hyps_list)):
         hyps = hyps_list[i]
         label = label_batch[i].item()  # Convert tensor to scalar

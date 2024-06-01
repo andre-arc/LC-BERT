@@ -108,15 +108,28 @@ class BertWhiteningDataset(Dataset):
         W = np.linalg.inv(W.T)
         return W, -mu
 
+    def _compute_kernel_bias_eigen(self, vecs):
+        vecs = np.concatenate(vecs, axis=0)
+        mu = vecs.mean(axis=0, keepdims=True)
+        cov = np.cov(vecs.T)
+
+        # Calculate Eigenvalues and Eigenvectors
+        u, s = np.linalg.eig(cov)
+
+        W = np.dot(u, np.diag(s**0.5))
+        W = np.linalg.inv(W.T)
+        return W, -mu
+
     def _compute_kernel_bias_pca(self, vecs):
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
         
         # Center the data
-        centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
+        # centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
         
         # Covariance matrix estimation
-        covariance_matrix = np.cov(centered_vecs.T, rowvar=True, bias=True)
+        # covariance_matrix = np.cov(centered_vecs.T, rowvar=True, bias=True)
+        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
 
         # Calculate Eigenvalues and Eigenvectors
         w, v = np.linalg.eig(covariance_matrix)
@@ -125,8 +138,29 @@ class BertWhiteningDataset(Dataset):
         diagw = np.diag(1/((w+.1e-5)**0.5))
         diagw = diagw.real.round(4)
 
-        # pca_matrix = np.dot(diagw, v.T)
-        pca_matrix = np.dot(np.dot(diagw, v.T), mu.T)
+        pca_matrix = np.dot(diagw, v.T)
+
+        # Invert and transpose W
+        # W = np.linalg.inv(W.T)
+        return pca_matrix, -mu
+
+    def _compute_kernel_bias_pca_svd(self, vecs):
+        vecs = np.concatenate(vecs, axis=0)
+        mu = vecs.mean(axis=0, keepdims=True)
+        
+        # Center the data
+        # centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
+        
+        # Covariance matrix estimation
+        # covariance_matrix = np.cov(centered_vecs.T, rowvar=True, bias=True)
+        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
+
+        u, s, vh = np.linalg.svd(covariance_matrix)
+
+        diag_sigma = np.diag(s)
+        diag_sigma_inv = np.diag(1 / (diag_sigma**0.5 + 1e-5))
+
+        pca_matrix = np.dot(diag_sigma_inv, vh.T)
 
         # Invert and transpose W
         # W = np.linalg.inv(W.T)
@@ -137,11 +171,12 @@ class BertWhiteningDataset(Dataset):
         mu = vecs.mean(axis=0, keepdims=True)
         
         # Center the data
-        centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
+        # centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
 
         # Apply PCA
         pca = PCA()
-        pca.fit(centered_vecs)
+        # pca.fit(centered_vecs)
+        pca.fit(vecs)
 
         # Calculate eigenvalues and eigenvectors
         # eigenvalues, eigenvectors = np.linalg.eig(pca.components_)
@@ -162,10 +197,10 @@ class BertWhiteningDataset(Dataset):
         mu = vecs.mean(axis=0, keepdims=True)
         
         # Center the data
-        centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
+        # centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
         
         # Covariance matrix estimation
-        covariance_matrix = np.cov(centered_vecs.T, rowvar=True, bias=True)
+        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
 
         # Calculate Eigenvalues and Eigenvectors
         w, v = np.linalg.eig(covariance_matrix)
@@ -175,8 +210,29 @@ class BertWhiteningDataset(Dataset):
         diagw = diagw.real.round(4)
 
         # Whitening transformation matrix
-        # zca_matrix = np.dot(np.dot(v, diagw), v.T)
-        zca_matrix = np.dot(np.dot(np.dot(v, diagw), v.T), mu.T)
+        zca_matrix = np.dot(np.dot(v, diagw), v.T)
+
+        # Return ZCA whitening matrix and mean
+        return zca_matrix, -mu
+
+    def _compute_kernel_bias_zca_svd(self, vecs):
+        vecs = np.concatenate(vecs, axis=0)
+        mu = vecs.mean(axis=0, keepdims=True)
+        
+        # Center the data
+        # centered_vecs = vecs - vecs.mean(axis=0, keepdims=True)
+        
+        # Covariance matrix estimation
+        # covariance_matrix = np.cov(centered_vecs.T, rowvar=True, bias=True)
+        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
+
+        u, s, vh = np.linalg.svd(covariance_matrix)
+
+        diag_sigma = np.diag(s)
+        diag_sigma_inv = np.diag(1 / (diag_sigma**0.5 + 1e-5))
+
+        # Whitening transformation matrix
+        zca_matrix = np.dot(np.dot(vh, diag_sigma_inv), vh.T)
 
         # Return ZCA whitening matrix and mean
         return zca_matrix, -mu
@@ -202,7 +258,9 @@ class BertWhiteningDataset(Dataset):
             inputs['input_ids'] = inputs['input_ids'].to(self.device)
             inputs['attention_mask'] = inputs['attention_mask'].to(self.device)
 
-            hidden_states = self.model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'], return_dict=True, output_hidden_states=True).hidden_states
+            hidden_states = self.model(input_ids=inputs['input_ids'], 
+                                        attention_mask=inputs['attention_mask'], 
+                                        return_dict=True, output_hidden_states=True).hidden_states
 
             if pooling == 'first_last_avg':
                 output_hidden_state = (hidden_states[-1] + hidden_states[1]).mean(dim=1)
@@ -246,10 +304,16 @@ class BertWhiteningDataset(Dataset):
 
         if(dim_technique == 'svd'):
             kernel, bias = self._compute_kernel_bias_svd([vecs])
+        if(dim_technique == 'eigen'):
+            kernel, bias = self._compute_kernel_bias_eigen([vecs])
         elif(dim_technique == 'zca'):
             kernel, bias = self._compute_kernel_bias_zca_base([vecs])
+        elif(dim_technique == 'zca-svd'):
+            kernel, bias = self._compute_kernel_bias_zca_svd([vecs])
         elif(dim_technique == 'pca'):
             kernel, bias = self._compute_kernel_bias_pca([vecs])
+        elif(dim_technique == 'pca-svd'):
+            kernel, bias = self._compute_kernel_bias_pca_svd([vecs])
             
         kernel = kernel[:, :target_dim]
         

@@ -2,7 +2,7 @@ name: lc-bert-pytorch
 channels:
   - conda-forge
 dependencies:
-  - python=3.9
+  - python=3.10
   - pandas
   - numpy
   - scikit-learn
