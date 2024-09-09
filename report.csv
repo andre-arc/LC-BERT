@@ -1,0 +1,15 @@
+model,size
+ag-news-normal|bert-base-uncased,417.661
+ag-news-normal|roberta-base,475.505
+ag-news-bert-whitening-svd|bilstm-dim-reduction,0.38
+ag-news-bert-whitening-svd|mlp-dim-reduction,0.004
+ag-news-bert-whitening-pca|bilstm-dim-reduction,0.38
+ag-news-bert-whitening-pca|mlp-dim-reduction,0.004
+ag-news-bert-whitening-zca|bilstm-dim-reduction,0.38
+ag-news-bert-whitening-zca|mlp-dim-reduction,0.004
+ag-news-roberta-whitening-svd|bilstm-dim-reduction,0.38
+ag-news-roberta-whitening-svd|mlp-dim-reduction,0.004
+ag-news-roberta-whitening-pca|bilstm-dim-reduction,0.38
+ag-news-roberta-whitening-pca|mlp-dim-reduction,0.004
+ag-news-roberta-whitening-zca|bilstm-dim-reduction,0.38
+ag-news-roberta-whitening-zca|mlp-dim-reduction,0.004
