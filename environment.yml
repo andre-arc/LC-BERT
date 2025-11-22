@@ -1,22 +1,100 @@
-name: lc-bert-pytorch
+name: lc-bert
 channels:
   - conda-forge
+  - pytorch
+  - defaults
+
 dependencies:
+  # Python
   - python=3.10
-  - pandas
-  - numpy
-  - scikit-learn
-  - matplotlib
+
+  # Core Data Science Stack
+  - numpy=1.22.4
+  - pandas=1.4.4
+  - scipy=1.8.0
+
+  # Machine Learning
+  - scikit-learn=1.0.2
+
+  # Visualization
+  - matplotlib=3.5.1
+  - seaborn=0.11.2
+
+  # Utilities
+  - tqdm=4.64.0
+  - nltk=3.7
+  - gensim=4.2.0
+
+  # Development Tools (optional - comment out if not needed)
   - jupyter
-  - tqdm
-  - nltk
   - ipykernel
   - ipython
-  - seaborn
-  - scipy=1.10.1
+
+  # Pip dependencies
   - pip
   - pip:
-    - gensim
-    - transformers
-    - sentencepiece
-    - tokenizers
+      # Transformers Ecosystem
+      - transformers==4.25.1
+      - tokenizers==0.13.2
+      - sentencepiece==0.1.97
+      - pathlib
+
+      # HTTP Requests (for Telegram notifications)
+      - requests==2.28.1
+
+      # NLP Preprocessing - Optional (uncomment if needed)
+      # - stanza==1.4.0  # For most accurate preprocessing (slow, requires model download)
+
+      # PyTorch - IMPORTANT: Install separately after environment creation
+      # based on your CUDA version. See installation instructions below.
+      # For CUDA 11.3, run after creating environment:
+      # pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+
+      # For CPU only:
+      # pip install torch==1.11.0 torchvision==0.12.0 torchaudio==0.11.0
+
+# ============================================================================
+# INSTALLATION INSTRUCTIONS
+# ============================================================================
+#
+# 1. Create environment:
+#    conda env create -f environment.yml
+#
+# 2. Activate environment:
+#    conda activate lc-bert
+#
+# 3. Install PyTorch (choose one based on your system):
+#
+#    For CUDA 11.3:
+#    pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+#
+#    For CPU only:
+#    pip install torch==1.11.0 torchvision==0.12.0 torchaudio==0.11.0
+#
+#    For other CUDA versions, visit: https://pytorch.org/get-started/locally/
+#
+# 4. Download NLTK data (required for preprocessing):
+#    python -c "import nltk; nltk.download('stopwords'); nltk.download('wordnet'); nltk.download('omw-1.4')"
+#
+# 5. (Optional) Download Stanza model for advanced preprocessing:
+#    python -c "import stanza; stanza.download('en')"
+#    Note: Only needed if using PREPROCESSING_METHOD='stanza'
+#
+# 6. Verify installation:
+#    python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+#
+# ============================================================================
+#
+# PREPROCESSING METHODS
+# ============================================================================
+#
+# The project supports three text preprocessing methods (see PREPROCESSING_METHODS.md):
+# - 'gensim' (default): Fast, no additional setup required
+# - 'nltk': Balanced speed/accuracy, requires NLTK data (step 4 above)
+# - 'stanza': Most accurate, requires Stanza model download (step 5 above)
+#
+# Set method via environment variable:
+#   Windows: set PREPROCESSING_METHOD=nltk
+#   Linux/Mac: export PREPROCESSING_METHOD=nltk
+#
+# ============================================================================

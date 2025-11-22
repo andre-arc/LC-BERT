@@ -103,3 +103,8 @@ data/downstream/*
 !data/download_datasets.sh
 
 save
+CLAUDE.md
+
+*.zip
+desktop.ini
+.claude/settings.local.json

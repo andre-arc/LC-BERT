@@ -9,6 +9,7 @@ from torch import optim
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 from transformers import AdamW
+from sklearn.model_selection import KFold
 
 from utils.functions import load_model, load_extraction_model, load_tokenizer
 from utils.args_helper import get_parser, append_dataset_args
@@ -52,6 +53,19 @@ def efficiency_metrics_wrapper(function):
         return result, elapsed_time, gpu_used
     
     return wrapper
+def efficiency_kfold_metrics_wrapper(function):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()  # Record the start time before the generator starts
+        generator = function(*args, **kwargs)  # Get the generator object
+        
+        for result in generator:
+            elapsed_time = time.time() - start_time  # Calculate elapsed time for this step
+            gpu_used = torch.cuda.max_memory_allocated() / (1024 * 1024)  # GPU memory used in MB
+            start_time = time.time()  # Reset start time for the next step
+            
+            yield result, elapsed_time, gpu_used  # Yield result along with timing and GPU usage
+    return wrapper
+
 
 def get_subset_data(path, subset_size):
     df = pd.read_csv(path)
@@ -106,6 +120,57 @@ def setup_dataloaders(args, tokenizer=None):
     
     return train_loader, valid_loader, test_loader
 
+def setup_kfold_dataloaders(args, tokenizer=None, k=5):
+    subset_percentage = int(args['subset_percentage'])
+    
+    # Load train dataset
+    train_dataset_path = args['train_set_path']
+    sampled_train_df = get_subset_data(train_dataset_path, subset_percentage)
+    
+    # Load validation dataset
+    valid_dataset_path = args['valid_set_path']
+    sampled_valid_df = get_subset_data(valid_dataset_path, subset_percentage)
+    
+    # Merge the train and validation datasets
+    merged_df = pd.concat([sampled_train_df, sampled_valid_df], ignore_index=True)
+    
+    if 'extract_model' not in args:
+        # Standard mode without feature extraction
+        dataset = args['dataset_class'](merged_df, tokenizer, lowercase=args["lower"], no_special_token=args['no_special_token'])
+    else:
+        # Feature extraction mode
+        extract_model, extract_tokenizer, a, b_ = load_extraction_model(args)
+        dataset = args['dataset_class'](args['device'], merged_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args['dim_technique'], lowercase=args["lower"], no_special_token=args['no_special_token'])
+
+    # Prepare the K-Fold cross-validation splits
+    kfold = KFold(n_splits=k, shuffle=True, random_state=args['seed'])
+
+    for fold, (train_idx, valid_idx) in enumerate(kfold.split(dataset)):
+        print(f"=========== Fold {fold + 1}/{k} ===========")
+        
+        # Subset the dataset for training and validation based on indices
+        train_subset = torch.utils.data.Subset(dataset, train_idx)
+        valid_subset = torch.utils.data.Subset(dataset, valid_idx)
+        
+        # Create DataLoaders for this fold
+        train_loader = args['dataloader_class'](dataset=train_subset, batch_size=args['train_batch_size'], shuffle=True)
+        valid_loader = args['dataloader_class'](dataset=valid_subset, batch_size=args['valid_batch_size'], shuffle=False)
+        
+        # Test set remains the same for all folds
+        if 'extract_model' not in args:
+            test_dataset_path = args['test_set_path']
+            sampled_test_df = get_subset_data(test_dataset_path, subset_percentage)
+            test_dataset = args['dataset_class'](sampled_test_df, tokenizer, lowercase=args["lower"], no_special_token=args['no_special_token'])
+        else:
+            test_dataset_path = args['test_set_path']
+            sampled_test_df = get_subset_data(test_dataset_path, subset_percentage)
+            test_dataset = args['dataset_class'](args['device'], sampled_test_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args['dim_technique'], lowercase=args["lower"], no_special_token=args['no_special_token'])
+        
+        test_loader = args['dataloader_class'](dataset=test_dataset, batch_size=args['valid_batch_size'], shuffle=False)
+
+        # Yield loaders for this fold
+        yield fold + 1, train_loader, valid_loader, test_loader
+
 ###
 # Training & Evaluation Function
 ###
@@ -150,13 +215,13 @@ def train(model, train_loader, valid_loader, optimizer, forward_fn, metrics_fn, 
     best_val_metric = -100
     count_stop = 0
 
+    train_accuracies, val_accuracies = [], []
+    train_losses, val_losses = [], []
+
     for epoch in range(n_epochs):
         model.train()
         total_train_loss = 0
         list_hyp, list_label = [], []
-        
-        # print(len(train_loader))
-        # exit()
 
         train_pbar = tqdm(iter(train_loader), leave=True, total=len(train_loader))
         for i, batch_data in enumerate(train_pbar):
@@ -186,6 +251,9 @@ def train(model, train_loader, valid_loader, optimizer, forward_fn, metrics_fn, 
                 total_train_loss/(i+1), get_lr(args, optimizer)))
                         
         metrics = metrics_fn(list_hyp, list_label)
+        train_accuracies.append(metrics["ACC"])
+        train_losses.append(total_train_loss / len(train_loader))
+
         print("(Epoch {}) TRAIN LOSS:{:.4f} {} LR:{:.8f}".format((epoch+1),
             total_train_loss/(i+1), metrics_to_string(metrics), get_lr(args, optimizer)))
         
@@ -195,6 +263,9 @@ def train(model, train_loader, valid_loader, optimizer, forward_fn, metrics_fn, 
         # evaluate
         if ((epoch+1) % evaluate_every) == 0:
             val_loss, val_metrics = evaluate(model, valid_loader, forward_fn, metrics_fn, i2w, is_test=False)
+
+            val_accuracies.append(val_metrics["ACC"])
+            val_losses.append(val_loss)
 
             # Early stopping
             val_metric = val_metrics[valid_criterion]
@@ -211,6 +282,8 @@ def train(model, train_loader, valid_loader, optimizer, forward_fn, metrics_fn, 
                 print("count stop:", count_stop)
                 if count_stop == early_stop:
                     break
+
+    return train_accuracies, val_accuracies, train_losses, val_losses
 
 if __name__ == "__main__":
     # Make sure cuda is deterministic
@@ -235,77 +308,125 @@ if __name__ == "__main__":
     w2i, i2w = args['dataset_class'].LABEL2INDEX, args['dataset_class'].INDEX2LABEL
     metrics_scores = []
     result_dfs = []
-    efficiency_metrics = []
+    # efficiency_metrics = []
 
     # load tokenizer
     tokenizer = load_tokenizer(args)
-    setup_dataloaders = efficiency_metrics_wrapper(setup_dataloaders)
-    result, elapsed_time, gpu_used = setup_dataloaders(args, tokenizer=tokenizer)
-    train_loader, valid_loader, test_loader = (result)
+    setup_kfold_dataloaders = efficiency_kfold_metrics_wrapper(setup_kfold_dataloaders)
 
-    efficiency_metrics.append({'ket':'Dataloader', 'elapsed_time':elapsed_time, 'gpu_used': gpu_used})
-
-
-    print("\n=========== TRAINING PHASE ===========")
-
-    # load model
-    model, tokenizer, vocab_path, config_path = load_model(args)
-    if args['device'] == "cuda":
-        model = model.cuda()
-
-    optimizer = optim.AdamW(params=model.parameters(), lr=args['lr'], eps=args['eps'])
-    # optimizer = optim.RAdam(params=model.parameters(), lr=args['lr'])
+    # Initialize lists to store efficiency metrics
+    all_efficiency_metrics = []
+    # Initialize lists to store metrics from each fold
+    all_train_accuracies = []
+    all_val_accuracies = []
+    all_train_losses = []
+    all_val_losses = []
+    all_f1_scores = []
+    all_elapsed_times = []
+    all_gpu_usages = []
 
 
-    train = efficiency_metrics_wrapper(train)
-    result, elapsed_time, gpu_used = train(model, train_loader=train_loader, valid_loader=valid_loader, optimizer=optimizer, forward_fn=args['forward_fn'], metrics_fn=args['metrics_fn'], valid_criterion=args['valid_criterion'], i2w=i2w, n_epochs=args['n_epochs'], evaluate_every=1, early_stop=args['early_stop'], step_size=args['step_size'], gamma=args['gamma'], model_dir=model_dir, exp_id=0)
+        # print(tes1)
+        # exit()
+    for (fold, train_loader, valid_loader, test_loader), elapsed_time, gpu_used in setup_kfold_dataloaders(args, tokenizer=tokenizer, k=5):
+        # fold, train_loader, valid_loader, test_loader = (result)
+        print(f"\nFold {fold} - Elapsed time: {elapsed_time} seconds, GPU used: {gpu_used} MB")
 
-    efficiency_metrics.append({'ket':'Train', 'elapsed_time':elapsed_time, 'gpu_used': gpu_used})
+        print(f"=========== Fold {fold + 1}/{5} ===========")
 
-    # Save Meta
-    if vocab_path:
-        shutil.copyfile(vocab_path, f'{model_dir}/vocab.txt')
-    if config_path:
-        shutil.copyfile(config_path, f'{model_dir}/config.json')
+        # Capture efficiency metrics for data loading
+        all_efficiency_metrics.append({
+            'fold': fold + 1,
+            'dataloader_elapsed_time': elapsed_time,
+            'dataloader_gpu_used': gpu_used
+        })
+
+
+        print("\n=========== TRAINING PHASE ===========")
+
+        # load model
+        model, tokenizer, vocab_path, config_path = load_model(args)
+        if args['device'] == "cuda":
+            model = model.cuda()
+
+        optimizer = optim.AdamW(params=model.parameters(), lr=args['lr'], eps=args['eps'])
+        # optimizer = optim.RAdam(params=model.parameters(), lr=args['lr'])
+
+
+        train = efficiency_metrics_wrapper(train)
+        result, elapsed_time, gpu_used = train(model, train_loader=train_loader, valid_loader=valid_loader, optimizer=optimizer, forward_fn=args['forward_fn'], metrics_fn=args['metrics_fn'], valid_criterion=args['valid_criterion'], i2w=i2w, n_epochs=args['n_epochs'], evaluate_every=1, early_stop=args['early_stop'], step_size=args['step_size'], gamma=args['gamma'], model_dir=model_dir, exp_id=0)
+        train_losses, val_losses, train_accuracies, val_accuracies= result
+
+        # # Log fold metrics
+        # print(f"Fold {fold + 1} - Dataloader elapsed time: {elapsed_time_dataloader:.2f} seconds, GPU used: {gpu_used_dataloader:.2f} MB")
+        # print(f"Fold {fold + 1} - Training elapsed time: {elapsed_time_train:.2f} seconds, GPU used: {gpu_used_train:.2f} MB")
+
+
+        # Save Meta
+        if vocab_path:
+            shutil.copyfile(vocab_path, f'{model_dir}/vocab.txt')
+        if config_path:
+            shutil.copyfile(config_path, f'{model_dir}/config.json')
+            
+        # Load best model
+        model.load_state_dict(torch.load(model_dir + "/best_model_0.th"))
+
+        # Evaluate
+        print("=========== EVALUATION PHASE ===========")
+        evaluate = efficiency_metrics_wrapper(evaluate)
+        test_result, test_elapsed_time, test_gpu_used = evaluate(model, data_loader=test_loader, forward_fn=args['forward_fn'], metrics_fn=args['metrics_fn'], i2w=i2w, is_test=True)
+        test_loss, test_metrics, test_hyp, test_label, test_seq = result
+
+        # efficiency_metrics.append({'ket':'Test', 'elapsed_time':elapsed_time, 'gpu_used': gpu_used})
+
+        metrics_scores.append(test_metrics)
+        result_dfs.append(pd.DataFrame({
+            'seq':test_seq, 
+            'hyp': test_hyp, 
+            'label': test_label
+        }))
         
-    # Load best model
-    model.load_state_dict(torch.load(model_dir + "/best_model_0.th"))
+        result_df = pd.concat(result_dfs)
+        metric_df = pd.DataFrame.from_records(metrics_scores)
 
-    # Evaluate
-    print("=========== EVALUATION PHASE ===========")
-    evaluate = efficiency_metrics_wrapper(evaluate)
-    result, elapsed_time, gpu_used = evaluate(model, data_loader=test_loader, forward_fn=args['forward_fn'], metrics_fn=args['metrics_fn'], i2w=i2w, is_test=True)
-    test_loss, test_metrics, test_hyp, test_label, test_seq = result
+        # Store metrics from each fold
+        all_train_accuracies.append(train_accuracies[-1])  # Append last epoch's accuracy
+        all_val_accuracies.append(val_accuracies[-1])      # Append last epoch's accuracy
+        all_train_losses.append(train_losses[-1])          # Append last epoch's loss
+        all_val_losses.append(val_losses[-1])              # Append last epoch's loss
+        all_f1_scores.append(test_metrics['F1'])           # Append from testing F1-score
+        all_elapsed_times.append(elapsed_time_train)       # Append training elapsed time
+        all_gpu_usages.append(gpu_used_train)              # Append GPU usage
+        
+        # print('== Prediction Result ==')
+        # print(result_df.head())
+        # print()
+        
+        # print('== Model Performance ==')
+        # print(metric_df.describe())
 
-    efficiency_metrics.append({'ket':'Test', 'elapsed_time':elapsed_time, 'gpu_used': gpu_used})
+        # print('== Model Efficiency Summary ==')
+        # summary_efficiency = pd.DataFrame(efficiency_metrics)
+        # sum = elapsed_timestamp_to_detail(summary_efficiency['elapsed_time'].sum())
+        # summary_efficiency = summary_efficiency.append({'ket':'Total', 'elapsed_time':sum, 'gpu_used': summary_efficiency['gpu_used'].iloc[-1]}, ignore_index=True)
+        # print(summary_efficiency)
+        
+        # result_df.to_csv(model_dir + "/prediction_result.csv")
+        # metric_df.describe().to_csv(model_dir + "/evaluation_result.csv")
+        # summary_efficiency.to_csv(model_dir + "/summary_efficiency.csv")
 
-    metrics_scores.append(test_metrics)
-    result_dfs.append(pd.DataFrame({
-        'seq':test_seq, 
-        'hyp': test_hyp, 
-        'label': test_label
-    }))
-    
-    result_df = pd.concat(result_dfs)
-    metric_df = pd.DataFrame.from_records(metrics_scores)
-    
-    print('== Prediction Result ==')
-    print(result_df.head())
-    print()
-    
-    print('== Model Performance ==')
-    print(metric_df.describe())
+    # Combine metrics from all folds
+    combined_metrics = {
+        'avg_train_accuracy': sum(all_train_accuracies) / len(all_train_accuracies),
+        'avg_val_accuracy': sum(all_val_accuracies) / len(all_val_accuracies),
+        'avg_train_loss': sum(all_train_losses) / len(all_train_losses),
+        'avg_val_loss': sum(all_val_losses) / len(all_val_losses),
+        'f1_score': all_f1_scores[-1],  # Take F1-score from the last fold
+        'max_gpu_usage': max(all_gpu_usages),
+        'avg_elapsed_time': sum(all_elapsed_times) / len(all_elapsed_times)
+    }
 
-    print('== Model Efficiency Summary ==')
-    summary_efficiency = pd.DataFrame(efficiency_metrics)
-    sum = elapsed_timestamp_to_detail(summary_efficiency['elapsed_time'].sum())
-    summary_efficiency = summary_efficiency.append({'ket':'Total', 'elapsed_time':sum, 'gpu_used': summary_efficiency['gpu_used'].iloc[-1]}, ignore_index=True)
-    print(summary_efficiency)
-    
-    result_df.to_csv(model_dir + "/prediction_result.csv")
-    metric_df.describe().to_csv(model_dir + "/evaluation_result.csv")
-    summary_efficiency.to_csv(model_dir + "/summary_efficiency.csv")
-
+    print(combined_metrics)
 # #load bert model & tokenizer
 # bert_base_model = BertModel.from_pretrained('bert-base-uncased').to(device)
 # tokenizer_bert = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True, truncating = True, padding_side='left')

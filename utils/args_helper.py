@@ -1,6 +1,11 @@
 import sys, os
-sys.path.append(os.path.join(os.path.dirname(__file__), "..\..\/"))
-os.chdir(os.path.join(os.path.dirname(__file__), "..\..\/"))
+
+# Get the directory two levels up from the current file
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add to path and change directory
+sys.path.append(parent_dir)
+os.chdir(parent_dir)
 
 from data_utils.ag_news.normal import BertNormalDataset, BertNormalDataLoader
 from data_utils.ag_news.extraction import BertExtractionDataset, BertExtractionDataLoader

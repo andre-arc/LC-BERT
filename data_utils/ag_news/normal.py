@@ -1,6 +1,11 @@
 import sys, os
-sys.path.append(os.path.join(os.path.dirname(__file__), "..\..\/"))
-os.chdir(os.path.join(os.path.dirname(__file__), "..\..\/"))
+
+# Get the directory two levels up from the current file
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add to path and change directory
+sys.path.append(parent_dir)
+os.chdir(parent_dir)
 
 import numpy as np
 import pandas as pd
@@ -16,7 +21,7 @@ class BertNormalDataset(Dataset):
     INDEX2LABEL = {0: 'world', 1: 'sports', 2: 'business', 3: 'science'}
     NUM_LABELS = 4
     
-    def load_dataset(self, dataset):
+    def load_dataset(self, dataset, apply_cleaning=False):
         # Read file
         # data = pd.read_csv(path)
         # dataset = []
@@ -29,9 +34,12 @@ class BertNormalDataset(Dataset):
 
         dataset['target'] = le.transform(dataset.iloc[:,0])
 
-        #clean docs
-        dataset['cleaned_text'] = clean(dataset['Description'])
+        if apply_cleaning:
+            dataset['cleaned_text'] = clean(dataset['Description'])
+        else:
+            dataset['cleaned_text'] = dataset['Description']
 
+        # return dataset.iloc[:1000,:]
         return dataset
     
     def __init__(self, dataset, tokenizer, no_special_token=False, *args, **kwargs):

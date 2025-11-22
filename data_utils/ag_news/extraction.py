@@ -1,6 +1,11 @@
 import sys, os
-sys.path.append(os.path.join(os.path.dirname(__file__), "..\..\/"))
-os.chdir(os.path.join(os.path.dirname(__file__), "..\..\/"))
+
+# Get the directory two levels up from the current file
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add to path and change directory
+sys.path.append(parent_dir)
+os.chdir(parent_dir)
 
 import numpy as np
 import pandas as pd
@@ -33,7 +38,7 @@ class BertExtractionDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-    def load_dataset(self, dataset):
+    def load_dataset(self, dataset, apply_cleaning=False):
         # dataset = []
         # Read file
         # data = pd.read_csv(path)
@@ -46,8 +51,10 @@ class BertExtractionDataset(Dataset):
 
         dataset['target'] = le.transform(dataset.iloc[:,0])
 
-        #clean docs
-        dataset['cleaned_text'] = clean(dataset['Description'])
+        if apply_cleaning:
+            dataset['cleaned_text'] = clean(dataset['Description'])
+        else:
+            dataset['cleaned_text'] = dataset['Description']
 
         return dataset
     
