@@ -102,9 +102,13 @@ class BertWhiteningDataset(Dataset):
         
     def _normalize(self, vecs):
         """
-            Standardization
+        L2 Normalization with numerical stability.
+
+        Normalizes vectors to unit length while preventing division by zero.
         """
-        return vecs / (vecs**2).sum(axis=1, keepdims=True)**0.5
+        norms = (vecs**2).sum(axis=1, keepdims=True)**0.5
+        # Clip norms to prevent division by zero (min value: 1e-8)
+        return vecs / np.clip(norms, 1e-8, np.inf)
         
     def _compute_kernel_bias_svd(self, vecs):
         """
@@ -114,13 +118,16 @@ class BertWhiteningDataset(Dataset):
 
         This method uses SVD to compute the whitening matrix that decorrelates
         the input features and normalizes their variance.
+
+        Based on standard BERT-whitening approach (Su et al., 2021).
         """
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
         cov = np.cov(vecs.T)
         u, s, vh = np.linalg.svd(cov)
-        W = np.dot(u, np.diag(1.0 / (s**0.5 + self.epsilon)))
-        W = np.linalg.inv(W.T)
+        # Standard whitening: W = U * Σ^(-1/2)
+        # No inverse needed - this is the correct formulation
+        W = np.dot(u, np.diag(1.0 / np.sqrt(s + self.epsilon)))
         return W, -mu
 
     def _compute_kernel_bias_eigen(self, vecs):
