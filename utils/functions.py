@@ -21,8 +21,8 @@ def load_model(args):
         # Instantiate model
         model = BertForWordClassification.from_pretrained(args['model_name'], config=config)
 
-#         for param in model.bert.parameters():
-#             param.requires_grad = False
+        for param in model.bert.parameters():
+            param.requires_grad = False
 
     elif 'roberta-base' in args['model_name']:
 
@@ -39,8 +39,8 @@ def load_model(args):
         # Instantiate model
         model = RobertaForWordClassification.from_pretrained(args['model_name'], config=config)
 
-#         for param in model.roberta.parameters():
-#           param.requires_grad = False
+        for param in model.roberta.parameters():
+          param.requires_grad = False
 
     elif 'distilbert-base-uncased' in args['model_name']:
         # Prepare config & tokenizer
@@ -56,8 +56,8 @@ def load_model(args):
         # Instantiate model
         model = DistilBertForWordClassification.from_pretrained(args['model_name'], config=config)
 
-#         for param in model.distilbert.parameters():
-#             param.requires_grad = False
+        for param in model.distilbert.parameters():
+            param.requires_grad = False
 
     elif 'albert-base-v2' in args['model_name']:
         # Prepare config & tokenizer
@@ -73,8 +73,8 @@ def load_model(args):
         # Instantiate model
         model = AlbertForWordClassification.from_pretrained(args['model_name'], config=config)
 
-#         for param in model.albert.parameters():
-#             param.requires_grad = False
+        for param in model.albert.parameters():
+            param.requires_grad = False
 
     elif 'bilstm' == args['model_name']:
         # Prepare config & tokenizer
