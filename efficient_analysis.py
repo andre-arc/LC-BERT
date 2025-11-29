@@ -287,10 +287,20 @@ if __name__ == "__main__":
     #  Clear GPU cache
     if args['device'] == "cuda":
         torch.cuda.empty_cache()
-    
+
+    # Save to model directory
+    summary_efficiency.to_csv(f"{model_dir}/summary_efficiency_{percent}.csv")
+
+    # Also save to centralized efficiency_analysis directory for easy aggregation
+    centralized_dir = "efficiency_analysis/raw_results"
+    os.makedirs(centralized_dir, exist_ok=True)
+    centralized_filename = f"{args['dataset']}_{args['experiment_name']}_percent{percent}.csv"
+    summary_efficiency.to_csv(f"{centralized_dir}/{centralized_filename}")
+    print(f"Results saved to: {model_dir}/summary_efficiency_{percent}.csv")
+    print(f"Also saved to: {centralized_dir}/{centralized_filename}")
+
     # result_df.to_csv(model_dir + "/prediction_result.csv")
     # metric_df.describe().to_csv(model_dir + "/evaluation_result.csv")
-    summary_efficiency.to_csv(f"{model_dir}/summary_efficiency_{percent}.csv")
 
 # #load bert model & tokenizer
 # bert_base_model = BertModel.from_pretrained('bert-base-uncased').to(device)

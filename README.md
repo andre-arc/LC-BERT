@@ -9,7 +9,6 @@ A research project exploring dimensionality reduction techniques applied to BERT
 - [Installation](#installation)
   - [Quick Start](#quick-start)
   - [Detailed Installation](#detailed-installation)
-  - [Minimal Installation](#minimal-installation)
 - [Usage](#usage)
   - [Training Models](#training-models)
   - [Running Experiments](#running-experiments)
@@ -40,6 +39,7 @@ This approach aims to reduce computational costs while maintaining competitive p
 - **Telegram Notifications**: Get notified when training tasks start, succeed, or fail
 - **Comprehensive Logging**: Track efficiency metrics (GPU usage, training time)
 - **Batch Processing**: Automated scripts for running multiple experiments
+- **Efficiency Analysis**: Automated workflow for running experiments across different data subset sizes with visualization
 
 ## Installation
 
@@ -82,18 +82,11 @@ python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA av
 The project provides two environment files:
 
 1. **Full installation** (`environment.yml`): Includes all dependencies including Jupyter, visualization tools
-2. **Minimal installation** (`environment-minimal.yml`): Core dependencies only (see [MINIMAL_INSTALL_GUIDE.md](MINIMAL_INSTALL_GUIDE.md))
 
 **Full Installation:**
 ```bash
 conda env create -f environment.yml
 conda activate lc-bert
-```
-
-**Minimal Installation:**
-```bash
-conda env create -f environment-minimal.yml
-conda activate lc-bert-minimal
 ```
 
 #### Step 3: Install PyTorch
@@ -133,10 +126,6 @@ python -c "import torch, transformers, numpy, pandas, sklearn; \
            print(f'CUDA available: {torch.cuda.is_available()}'); \
            print(f'Transformers: {transformers.__version__}')"
 ```
-
-### Minimal Installation
-
-For a lightweight setup with only core dependencies (no Jupyter, minimal packages), see [MINIMAL_INSTALL_GUIDE.md](MINIMAL_INSTALL_GUIDE.md).
 
 ## Usage
 
@@ -209,9 +198,45 @@ windows_scripts\run_task_benchmark.bat 0 3 32
 
 REM With Telegram notifications
 windows_scripts\run_with_notification.bat windows_scripts\run_task_modified.bat 0 3 32
+
+REM Automated efficiency analysis (runs experiments across subset percentages)
+windows_scripts\run_efficiency_analysis_auto.bat 0 3 32
+
+REM Complete efficiency pipeline (experiments + aggregation + visualization)
+windows_scripts\run_complete_efficiency_analysis.bat 0 3 32
 ```
 
 **Note**: Batch scripts contain many commented experiment configurations. Uncomment specific lines to run different whitening techniques or model combinations.
+
+#### Efficiency Analysis
+
+The project includes an automated efficiency analysis workflow for comparing experiments across different data subset sizes (10%-100%):
+
+```batch
+REM 1. Configure which experiments to run
+REM Edit efficiency_config.txt and set ENABLED=1 for desired experiments
+
+REM 2. Run complete pipeline (experiments + aggregation + plots)
+windows_scripts\run_complete_efficiency_analysis.bat 0 3 32
+
+REM 3. Or run steps individually:
+
+REM   a. Run experiments only
+windows_scripts\run_efficiency_analysis_auto.bat 0 3 32
+
+REM   b. Aggregate results
+python aggregate_efficiency_results.py --verbose
+
+REM   c. Generate visualizations
+python visualize_efficiency.py
+```
+
+Results are automatically saved to:
+- `efficiency_analysis/all_efficiency_results_*.csv` - Complete aggregated data
+- `efficiency_analysis/summary_*.csv` - Summary statistics
+- `efficiency_analysis/plots/` - Visualization charts
+
+See [EFFICIENCY_ANALYSIS_GUIDE.md](EFFICIENCY_ANALYSIS_GUIDE.md) for detailed documentation.
 
 #### Linux
 
@@ -311,15 +336,12 @@ LC-BERT/
 ├── telegram_notifier.py     # Telegram notification utility
 ├── test_preprocessing.py    # Test preprocessing methods
 ├── environment.yml          # Conda environment (full)
-├── environment-minimal.yml  # Minimal conda environment
 ├── requirements.txt         # Pip requirements
-├── requirements-minimal.txt # Minimal pip requirements
 ├── .env.example             # Example Telegram config
 ├── README.md                # This file
 ├── CLAUDE.md                # Project documentation for Claude Code
 ├── PREPROCESSING_METHODS.md # Preprocessing guide
 ├── TELEGRAM_SETUP.md        # Telegram setup guide
-├── MINIMAL_INSTALL_GUIDE.md # Minimal installation guide
 ├── EPSILON_USAGE.md         # Epsilon parameter documentation
 └── CLEAN_ENVIRONMENT.md     # Environment cleanup guide
 ```
@@ -427,7 +449,6 @@ If you use this code in your research, please cite:
 - [CLAUDE.md](CLAUDE.md) - Comprehensive project guide for Claude Code
 - [PREPROCESSING_METHODS.md](PREPROCESSING_METHODS.md) - Detailed preprocessing documentation
 - [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md) - Telegram notification setup
-- [MINIMAL_INSTALL_GUIDE.md](MINIMAL_INSTALL_GUIDE.md) - Minimal installation guide
 - [EPSILON_USAGE.md](EPSILON_USAGE.md) - Epsilon parameter explanation
 - [CLEAN_ENVIRONMENT.md](CLEAN_ENVIRONMENT.md) - Environment cleanup instructions
 

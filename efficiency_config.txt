@@ -1,0 +1,33 @@
+# Efficiency Analysis Configuration File
+#
+# Format: ENABLED|MODEL_NAME|DATASET|EXPERIMENT_NAME|LR|SEED|OTHER_ARGS
+# Lines starting with # are comments
+# Set ENABLED to 1 to run, 0 to skip
+#
+# Subset percentages will be: 10, 20, 30, 40, 50, 60, 70, 80, 90, 100
+
+# === BENCHMARK MODELS (Full BERT/RoBERTa) ===
+0|bert-base-uncased|ag-news-normal|bert_benchmark|1e-4|88|
+0|roberta-base|ag-news-normal|roberta_benchmark|1e-4|88|
+
+# === BERT WHITENING EXPERIMENTS ===
+# BERT + ZCA Whitening
+1|bilstm-dim-reduction|ag-news-bert-whitening-zca|ag-news-bert-whitening-zca-modified|1.8e-3|88|
+# BERT + PCA Whitening
+0|bilstm-dim-reduction|ag-news-bert-whitening-pca|ag-news-bert-whitening-pca-modified|1e-3|88|
+# BERT + SVD Whitening
+0|bilstm-dim-reduction|ag-news-bert-whitening-svd|ag-news-bert-whitening-svd-modified|1e-3|88|
+
+# === ROBERTA WHITENING EXPERIMENTS ===
+# RoBERTa + ZCA Whitening
+1|bilstm-dim-reduction|ag-news-roberta-whitening-zca|ag-news-roberta-whitening-zca-modified|1.8e-3|42|
+# RoBERTa + PCA Whitening
+0|bilstm-dim-reduction|ag-news-roberta-whitening-pca|ag-news-roberta-whitening-pca-modified|1e-3|42|
+# RoBERTa + SVD Whitening
+0|bilstm-dim-reduction|ag-news-roberta-whitening-svd|ag-news-roberta-whitening-svd-modified|1e-3|42|
+
+# === MLP VARIANTS (uncomment to test MLP instead of BiLSTM) ===
+# BERT + ZCA + MLP
+0|mlp-dim-reduction|ag-news-bert-whitening-zca|ag-news-bert-whitening-zca-mlp|1.8e-3|88|
+# RoBERTa + ZCA + MLP
+0|mlp-dim-reduction|ag-news-roberta-whitening-zca|ag-news-roberta-whitening-zca-mlp|1.8e-3|42|
