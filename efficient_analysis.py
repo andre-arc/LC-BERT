@@ -43,14 +43,20 @@ def elapsed_timestamp_to_detail(elapsed_time):
 
 def efficiency_metrics_wrapper(function):
     def wrapper(*args, **kwargs):
+        # Reset GPU memory stats BEFORE the function runs for accurate isolated measurement
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.empty_cache()  # Clear cache for clean baseline
 
         start_time = time.time()  # Record the start time
         result = function(*args, **kwargs)
         elapsed_time = time.time() - start_time  # Calculate the elapsed time
-        gpu_used = torch.cuda.max_memory_allocated() / (1024 * 1024) # in MB
+
+        # Now measure peak memory for THIS function only
+        gpu_used = torch.cuda.max_memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0  # in MB
 
         return result, elapsed_time, gpu_used
-    
+
     return wrapper
 
 def get_subset_data(path, subset_size):
@@ -224,8 +230,14 @@ if __name__ == "__main__":
         raise Exception(f'Model directory `{model_dir}` already exists. Use --force if you want to overwrite the folder.')
 
     # Set random seed
-    set_seed(args['seed'])  # Added here for reproducibility    
-    
+    set_seed(args['seed'])  # Added here for reproducibility
+
+    # Initial GPU memory reset for clean start
+    if args['device'] == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        print("GPU memory tracking initialized\n")
+
     w2i, i2w = args['dataset_class'].LABEL2INDEX, args['dataset_class'].INDEX2LABEL
     metrics_scores = []
     result_dfs = []
@@ -284,13 +296,19 @@ if __name__ == "__main__":
     summary_efficiency = summary_efficiency.groupby('percentage').apply(lambda x: x.append({'ket':'Total', 'elapsed_time': sum[x.name], 'gpu_used': x['gpu_used'].iloc[-1]}, ignore_index=True))
     print(summary_efficiency)
 
-    #  Clear GPU cache
-    if args['device'] == "cuda":
-        torch.cuda.empty_cache()
-    
+    # Save to model directory
+    summary_efficiency.to_csv(f"{model_dir}/summary_efficiency_{percent}.csv")
+
+    # Also save to centralized efficiency_analysis directory for easy aggregation
+    centralized_dir = "efficiency_analysis/raw_results"
+    os.makedirs(centralized_dir, exist_ok=True)
+    centralized_filename = f"{args['dataset']}_{args['experiment_name']}_percent{percent}.csv"
+    summary_efficiency.to_csv(f"{centralized_dir}/{centralized_filename}")
+    print(f"Results saved to: {model_dir}/summary_efficiency_{percent}.csv")
+    print(f"Also saved to: {centralized_dir}/{centralized_filename}")
+
     # result_df.to_csv(model_dir + "/prediction_result.csv")
     # metric_df.describe().to_csv(model_dir + "/evaluation_result.csv")
-    summary_efficiency.to_csv(f"{model_dir}/summary_efficiency_{percent}.csv")
 
 # #load bert model & tokenizer
 # bert_base_model = BertModel.from_pretrained('bert-base-uncased').to(device)
@@ -299,6 +317,4 @@ if __name__ == "__main__":
 # #load roberta model & tokenizer
 # roberta_model = RobertaModel.from_pretrained('roberta-base', output_hidden_states=True).to(device)
 # tokenizer_roberta = RobertaTokenizer.from_pretrained('roberta-base')
-
-
 

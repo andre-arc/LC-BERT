@@ -46,14 +46,20 @@ def elapsed_timestamp_to_detail(elapsed_time):
 
 def efficiency_metrics_wrapper(function):
     def wrapper(*args, **kwargs):
+        # Reset GPU memory stats BEFORE the function runs for accurate isolated measurement
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.empty_cache()  # Clear cache for clean baseline
 
         start_time = time.time()  # Record the start time
         result = function(*args, **kwargs)
         elapsed_time = time.time() - start_time  # Calculate the elapsed time
-        gpu_used = torch.cuda.max_memory_allocated() / (1024 * 1024) # in MB
+
+        # Now measure peak memory for THIS function only
+        gpu_used = torch.cuda.max_memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0  # in MB
 
         return result, elapsed_time, gpu_used
-    
+
     return wrapper
 
 def get_subset_data(path, subset_size, seed):
@@ -214,10 +220,16 @@ def train(model, train_loader, valid_loader, optimizer, forward_fn, metrics_fn, 
 if __name__ == "__main__":
     # Make sure cuda is deterministic
     torch.backends.cudnn.deterministic = True
-    
+
     # Parse args
     args = get_parser()
     args = append_dataset_args(args)
+
+    # Initial GPU memory reset for clean start
+    if args['device'] == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        print("GPU memory tracking initialized\n")
 
     # create directory
     model_dir = '{}/{}/{}'.format(args["model_dir"],args["dataset"],args['experiment_name'])
@@ -251,11 +263,12 @@ if __name__ == "__main__":
         
         # Set random seed
         set_seed(seed)
-        
-        # Reset CUDA memory tracking
+
+        # Reset CUDA memory tracking at start of each seed iteration
         if torch.cuda.is_available():
+            torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
-        
+
         metrics_scores = []
         result_dfs = []
         efficiency_metrics = []
@@ -265,6 +278,11 @@ if __name__ == "__main__":
         setup_dataloaders_wrapped = efficiency_metrics_wrapper(setup_dataloaders)
         result, elapsed_time, gpu_used = setup_dataloaders_wrapped(args, tokenizer=tokenizer, seed=seed)
         train_loader, valid_loader, test_loader = result
+
+        # Store dataset references for cleanup later
+        train_dataset = train_loader.dataset if hasattr(train_loader, 'dataset') else None
+        valid_dataset = valid_loader.dataset if hasattr(valid_loader, 'dataset') else None
+        test_dataset = test_loader.dataset if hasattr(test_loader, 'dataset') else None
 
         efficiency_metrics.append({'ket':'Dataloader', 'elapsed_time':elapsed_time, 'gpu_used': gpu_used, 'seed': seed})
 
@@ -342,11 +360,39 @@ if __name__ == "__main__":
         all_metrics_scores.append(test_metrics)
         all_result_dfs.extend(result_dfs)
         all_efficiency_metrics.extend(efficiency_metrics)
-        
+
         print(f"\nSeed {seed} Results:")
         for key, value in test_metrics.items():
             if key != 'seed':
                 print(f"  {key}: {value:.4f}")
+
+        # Clean up memory after each seed to prevent accumulation
+        del model
+        del optimizer
+        del train_loader
+        del valid_loader
+        del test_loader
+        if train_dataset is not None:
+            del train_dataset
+        if valid_dataset is not None:
+            del valid_dataset
+        if test_dataset is not None:
+            del test_dataset
+        del tokenizer
+
+        # Clean up extraction model if it exists (for whitening datasets)
+        if 'extract_model' in dir():
+            try:
+                del extract_model
+                del extract_tokenizer
+            except:
+                pass
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+
+        print(f"Memory cleaned up after seed {seed}\n")
     
     # Calculate statistics across all seeds
     print(f"\n{'='*60}")
