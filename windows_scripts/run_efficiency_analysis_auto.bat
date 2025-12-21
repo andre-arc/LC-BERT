@@ -64,13 +64,13 @@ for /f "tokens=1-6 delims=|" %%a in ('type "%CONFIG_FILE%" ^| findstr /v "^#" ^|
     set LR=%%e
     set SEED=%%f
 
-    REM Remove leading/trailing spaces
-    set ENABLED=!ENABLED: =!
-    set MODEL_NAME=!MODEL_NAME: =!
-    set DATASET=!DATASET: =!
-    set EXPERIMENT=!EXPERIMENT: =!
-    set LR=!LR: =!
-    set SEED=!SEED: =!
+    REM Remove leading/trailing spaces (trim whitespace)
+    for /f "tokens=*" %%x in ("!ENABLED!") do set ENABLED=%%x
+    for /f "tokens=*" %%x in ("!MODEL_NAME!") do set MODEL_NAME=%%x
+    for /f "tokens=*" %%x in ("!DATASET!") do set DATASET=%%x
+    for /f "tokens=*" %%x in ("!EXPERIMENT!") do set EXPERIMENT=%%x
+    for /f "tokens=*" %%x in ("!LR!") do set LR=%%x
+    for /f "tokens=*" %%x in ("!SEED!") do set SEED=%%x
 
     REM Check if experiment is enabled
     if "!ENABLED!"=="1" (
