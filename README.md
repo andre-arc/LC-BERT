@@ -339,7 +339,6 @@ LC-BERT/
 ├── requirements.txt         # Pip requirements
 ├── .env.example             # Example Telegram config
 ├── README.md                # This file
-├── CLAUDE.md                # Project documentation for Claude Code
 ├── PREPROCESSING_METHODS.md # Preprocessing guide
 ├── TELEGRAM_SETUP.md        # Telegram setup guide
 ├── EPSILON_USAGE.md         # Epsilon parameter documentation
@@ -446,7 +445,6 @@ If you use this code in your research, please cite:
 
 ## Additional Documentation
 
-- [CLAUDE.md](CLAUDE.md) - Comprehensive project guide for Claude Code
 - [PREPROCESSING_METHODS.md](PREPROCESSING_METHODS.md) - Detailed preprocessing documentation
 - [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md) - Telegram notification setup
 - [EPSILON_USAGE.md](EPSILON_USAGE.md) - Epsilon parameter explanation
@@ -476,7 +474,6 @@ If you use this code in your research, please cite:
 ### Getting Help
 
 - Check existing documentation in the repository
-- Review [CLAUDE.md](CLAUDE.md) for detailed technical information
 - Open an issue on GitHub with error logs and system information
 
 ---

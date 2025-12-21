@@ -6,28 +6,59 @@
 #
 # Subset percentages will be: 10, 20, 30, 40, 50, 60, 70, 80, 90, 100
 
-# === BENCHMARK MODELS (Full BERT/RoBERTa) ===
-0|bert-base-uncased|ag-news-normal|bert_benchmark|1e-4|88|
-0|roberta-base|ag-news-normal|roberta_benchmark|1e-4|88|
+# ============================================
+# BENCHMARK MODELS (Full Transformer Models)
+# ============================================
+1|bert-base-uncased|ag-news-normal|bert_benchmark|1e-4|88|
+1|roberta-base|ag-news-normal|roberta_benchmark|1e-4|88|
+1|distilbert-base-uncased|ag-news-normal|distilbert_benchmark|1e-4|88|
 
-# === BERT WHITENING EXPERIMENTS ===
-# BERT + ZCA Whitening
-1|bilstm-dim-reduction|ag-news-bert-whitening-zca|ag-news-bert-whitening-zca-modified|1.8e-3|88|
-# BERT + PCA Whitening
-0|bilstm-dim-reduction|ag-news-bert-whitening-pca|ag-news-bert-whitening-pca-modified|1e-3|88|
-# BERT + SVD Whitening
-0|bilstm-dim-reduction|ag-news-bert-whitening-svd|ag-news-bert-whitening-svd-modified|1e-3|88|
+# ============================================
+# BERT WHITENING + BiLSTM
+# ============================================
+# BERT + SVD + BiLSTM
+1|bilstm-dim-reduction|ag-news-bert-whitening-svd|ag-news-bert-whitening-svd-bilstm|2e-3|88|
+# BERT + ZCA + BiLSTM
+1|bilstm-dim-reduction|ag-news-bert-whitening-zca|ag-news-bert-whitening-zca-bilstm|1.8e-3|88|
+# BERT + PCA + BiLSTM
+1|bilstm-dim-reduction|ag-news-bert-whitening-pca|ag-news-bert-whitening-pca-bilstm|2e-3|88|
 
-# === ROBERTA WHITENING EXPERIMENTS ===
-# RoBERTa + ZCA Whitening
-1|bilstm-dim-reduction|ag-news-roberta-whitening-zca|ag-news-roberta-whitening-zca-modified|1.8e-3|42|
-# RoBERTa + PCA Whitening
-0|bilstm-dim-reduction|ag-news-roberta-whitening-pca|ag-news-roberta-whitening-pca-modified|1e-3|42|
-# RoBERTa + SVD Whitening
-0|bilstm-dim-reduction|ag-news-roberta-whitening-svd|ag-news-roberta-whitening-svd-modified|1e-3|42|
-
-# === MLP VARIANTS (uncomment to test MLP instead of BiLSTM) ===
+# ============================================
+# BERT WHITENING + MLP
+# ============================================
+# BERT + SVD + MLP
+1|mlp-dim-reduction|ag-news-bert-whitening-svd|ag-news-bert-whitening-svd-mlp|2e-3|88|
 # BERT + ZCA + MLP
-0|mlp-dim-reduction|ag-news-bert-whitening-zca|ag-news-bert-whitening-zca-mlp|1.8e-3|88|
+1|mlp-dim-reduction|ag-news-bert-whitening-zca|ag-news-bert-whitening-zca-mlp|1.8e-3|88|
+# BERT + PCA + MLP
+1|mlp-dim-reduction|ag-news-bert-whitening-pca|ag-news-bert-whitening-pca-mlp|2e-3|88|
+
+# ============================================
+# ROBERTA WHITENING + BiLSTM
+# ============================================
+# RoBERTa + SVD + BiLSTM
+1|bilstm-dim-reduction|ag-news-roberta-whitening-svd|ag-news-roberta-whitening-svd-bilstm|2e-3|42|
+# RoBERTa + ZCA + BiLSTM
+1|bilstm-dim-reduction|ag-news-roberta-whitening-zca|ag-news-roberta-whitening-zca-bilstm|2e-3|42|
+# RoBERTa + PCA + BiLSTM
+1|bilstm-dim-reduction|ag-news-roberta-whitening-pca|ag-news-roberta-whitening-pca-bilstm|2e-3|42|
+
+# ============================================
+# ROBERTA WHITENING + MLP
+# ============================================
+# RoBERTa + SVD + MLP
+1|mlp-dim-reduction|ag-news-roberta-whitening-svd|ag-news-roberta-whitening-svd-mlp|2e-3|42|
 # RoBERTa + ZCA + MLP
-0|mlp-dim-reduction|ag-news-roberta-whitening-zca|ag-news-roberta-whitening-zca-mlp|1.8e-3|42|
+1|mlp-dim-reduction|ag-news-roberta-whitening-zca|ag-news-roberta-whitening-zca-mlp|2e-3|42|
+# RoBERTa + PCA + MLP
+1|mlp-dim-reduction|ag-news-roberta-whitening-pca|ag-news-roberta-whitening-pca-mlp|2e-3|42|
+
+# ============================================
+# EXPERIMENTAL (Not recommended for production)
+# ============================================
+# BERT + ZCA-SVD + BiLSTM
+0|bilstm-dim-reduction|ag-news-bert-whitening-zca-svd|ag-news-bert-whitening-zca-svd-bilstm|1.8e-3|88|
+# BERT + PCA-SVD + BiLSTM
+0|bilstm-dim-reduction|ag-news-bert-whitening-pca-svd|ag-news-bert-whitening-pca-svd-bilstm|2e-3|88|
+# BERT + EIGEN + BiLSTM
+0|bilstm-dim-reduction|ag-news-bert-whitening-eigen|ag-news-bert-whitening-eigen-bilstm|2e-3|88|
