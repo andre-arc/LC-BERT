@@ -5,6 +5,11 @@ REM Usage: run_efficiency_analysis_auto.bat GPU_ID EARLY_STOP BATCH_SIZE
 
 setlocal enabledelayedexpansion
 
+REM Get the directory where this script is located
+set SCRIPT_DIR=%~dp0
+REM Navigate to project root (parent of windows_scripts)
+cd /d "%SCRIPT_DIR%.."
+
 REM Parse command line arguments
 set GPU_ID=%1
 set EARLY_STOP=%2
@@ -56,25 +61,15 @@ REM Subset percentages to test
 set PERCENTAGES=10 20 30 40 50 60 70 80 90 100
 
 REM Read config file and run enabled experiments
-for /f "tokens=1-6 delims=|" %%a in ('type "%CONFIG_FILE%" ^| findstr /v "^#" ^| findstr /v "^$"') do (
-    set ENABLED=%%a
-    set MODEL_NAME=%%b
-    set DATASET=%%c
-    set EXPERIMENT=%%d
-    set LR=%%e
-    set SEED=%%f
+for /f "usebackq tokens=1-6 delims=| eol=#" %%a in ("%CONFIG_FILE%") do (
+    REM Skip empty lines and process enabled experiments
+    if "%%a"=="1" (
+        set "MODEL_NAME=%%b"
+        set "DATASET=%%c"
+        set "EXPERIMENT=%%d"
+        set "LR=%%e"
+        set "SEED=%%f"
 
-    REM Remove leading/trailing spaces (trim whitespace)
-    for /f "tokens=*" %%x in ("!ENABLED!") do set ENABLED=%%x
-    for /f "tokens=*" %%x in ("!MODEL_NAME!") do set MODEL_NAME=%%x
-    for /f "tokens=*" %%x in ("!DATASET!") do set DATASET=%%x
-    for /f "tokens=*" %%x in ("!EXPERIMENT!") do set EXPERIMENT=%%x
-    for /f "tokens=*" %%x in ("!LR!") do set LR=%%x
-    for /f "tokens=*" %%x in ("!SEED!") do set SEED=%%x
-
-    REM Check if experiment is enabled
-    if "!ENABLED!"=="1" (
-        echo.
         echo ========================================
         echo Running: !EXPERIMENT!
         echo Dataset: !DATASET!
@@ -111,8 +106,6 @@ for /f "tokens=1-6 delims=|" %%a in ('type "%CONFIG_FILE%" ^| findstr /v "^#" ^|
         )
 
         echo Completed: !EXPERIMENT!
-    ) else (
-        echo Skipping (disabled): !EXPERIMENT!
     )
 )
 
