@@ -1,0 +1,15 @@
+,,,elapsed_time,elapsed_time,elapsed_time,elapsed_time,elapsed_time,gpu_used,gpu_used
+,,,mean,std,min,max,count,mean,max
+dataset,experiment,ket,,,,,,,
+ag-news-normal,bert_benchmark,Dataloader,0.21,0.01,0.2,0.22,10,0.0,0.0
+ag-news-normal,bert_benchmark,Test,39.41,33.71,2.59,102.96,10,465.09,467.77
+ag-news-normal,bert_benchmark,Total,2419.25,1847.68,203.19,5575.26,10,465.09,467.77
+ag-news-normal,bert_benchmark,Train,2379.63,1814.13,200.4,5472.09,10,1182.51,1200.81
+ag-news-normal,distilbert_benchmark,Dataloader,0.21,0.01,0.2,0.25,10,0.0,0.0
+ag-news-normal,distilbert_benchmark,Test,38.7,32.09,2.52,93.57,10,465.09,467.77
+ag-news-normal,distilbert_benchmark,Total,2408.54,1840.45,200.24,5535.77,10,465.09,467.77
+ag-news-normal,distilbert_benchmark,Train,2369.63,1808.42,197.47,5441.98,10,1182.51,1200.81
+ag-news-normal,roberta_benchmark,Dataloader,0.22,0.02,0.2,0.27,10,0.0,0.0
+ag-news-normal,roberta_benchmark,Test,36.42,29.89,2.75,91.16,10,518.95,521.49
+ag-news-normal,roberta_benchmark,Total,2319.46,1802.92,180.19,5414.67,10,518.95,521.49
+ag-news-normal,roberta_benchmark,Train,2282.82,1773.09,177.21,5323.29,10,1151.53,1167.73
