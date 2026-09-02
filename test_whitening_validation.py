@@ -1,151 +1,188 @@
 """
-Test script to validate whitening implementations against sklearn and standard formulas.
+Validate the whitening kernels against the defining constraint of whitening.
+
+This test exercises the SAME code path the training pipeline uses. The pipeline
+applies kernels to ROW vectors:
+
+    z = (x + bias) . kernel          # data_utils/ag_news/whitening.py
+
+so for the transform to be a whitening transform the kernel W must satisfy
+
+    W^T . Sigma . W = I
+
+(equivalently W^T W = Sigma^-1 for the column-vector form W^T used by
+Kessy et al. 2018, Eq. 3). An earlier version of this script applied
+`pca_matrix.T` instead of `pca_matrix`, so it validated the transpose of what
+the pipeline actually computes and could not detect an orientation error.
+
+Run:  python test_whitening_validation.py
 """
 
 import numpy as np
-from sklearn.decomposition import PCA
 
-# Generate sample data
-np.random.seed(42)
-n_samples = 1000
-n_features = 10
+from data_utils.ag_news.whitening import BertWhiteningDataset
 
-# Create correlated data
-mean = np.zeros(n_features)
-cov = np.random.rand(n_features, n_features)
-cov = cov @ cov.T  # Make it positive semi-definite
-X = np.random.multivariate_normal(mean, cov, n_samples)
 
-print("=" * 80)
-print("TESTING WHITENING IMPLEMENTATIONS")
-print("=" * 80)
-print(f"\nOriginal data shape: {X.shape}")
-print(f"Original data mean: {X.mean(axis=0)[:3]}...")
-print(f"Original data std: {X.std(axis=0)[:3]}...")
+class KernelMath:
+    """
+    Borrow the kernel math from BertWhiteningDataset without constructing a
+    dataset, so no tokenizer, model or GPU is required.
+    """
+    epsilon = BertWhiteningDataset.EPSILON
 
-# 1. Compute covariance matrix
-mu = X.mean(axis=0, keepdims=True)
-X_centered = X - mu
-cov_matrix = np.cov(X_centered.T, bias=True)
+    _covariance = BertWhiteningDataset._covariance
+    _fix_signs = BertWhiteningDataset._fix_signs
+    _sorted_eigh = BertWhiteningDataset._sorted_eigh
+    _normalize = BertWhiteningDataset._normalize
+    _transform_and_normalize = BertWhiteningDataset._transform_and_normalize
 
-# 2. Eigendecomposition
-w, v = np.linalg.eig(cov_matrix)
-w = w.real
-v = v.real
+    _compute_kernel_bias_svd = BertWhiteningDataset._compute_kernel_bias_svd
+    _compute_kernel_bias_eigen = BertWhiteningDataset._compute_kernel_bias_eigen
+    _compute_kernel_bias_pca = BertWhiteningDataset._compute_kernel_bias_pca
+    _compute_kernel_bias_pca_svd = BertWhiteningDataset._compute_kernel_bias_pca_svd
+    _compute_kernel_bias_pca_cor = BertWhiteningDataset._compute_kernel_bias_pca_cor
+    _compute_kernel_bias_zca_base = BertWhiteningDataset._compute_kernel_bias_zca_base
+    _compute_kernel_bias_zca_svd = BertWhiteningDataset._compute_kernel_bias_zca_svd
 
-print(f"\nEigenvalues (first 3): {w[:3]}")
-print(f"Sum of eigenvalues (should equal trace): {w.sum():.4f} vs {np.trace(cov_matrix):.4f}")
 
-# 3. PCA Whitening (Your implementation)
-print("\n" + "=" * 80)
-print("1. YOUR PCA WHITENING IMPLEMENTATION")
-print("=" * 80)
+TECHNIQUES = {
+    'svd (BERT-Whitening)': '_compute_kernel_bias_svd',
+    'pca': '_compute_kernel_bias_pca',
+    'pca-cor': '_compute_kernel_bias_pca_cor',
+    'pca-svd': '_compute_kernel_bias_pca_svd',
+    'zca': '_compute_kernel_bias_zca_base',
+    'zca-svd': '_compute_kernel_bias_zca_svd',
+    'eigen': '_compute_kernel_bias_eigen',
+}
 
-epsilon = 1e-5
-diagw = np.diag(1/((w + epsilon)**0.5))
-pca_matrix_yours = np.dot(diagw, v.T)  # D^(-1/2) @ V^T
+N_FEATURES = 10
+TARGET_DIM = 6          # stands in for the pipeline's 768 -> 256 truncation
+TOLERANCE = 1e-5
 
-# Apply transformation
-X_whitened_yours = (X_centered @ pca_matrix_yours.T)
 
-print(f"Transformed shape: {X_whitened_yours.shape}")
-print(f"Transformed mean: {X_whitened_yours.mean(axis=0)[:3]}...")
-print(f"Transformed std: {X_whitened_yours.std(axis=0)[:3]}...")
+def make_correlated_data(n_samples=5000, n_features=N_FEATURES, seed=42):
+    """Correlated Gaussian data with a positive-definite covariance."""
+    rng = np.random.RandomState(seed)
+    a = rng.rand(n_features, n_features)
+    cov = a @ a.T + np.eye(n_features) * 0.5
+    return rng.multivariate_normal(np.zeros(n_features), cov, n_samples)
 
-# Check if covariance is identity
-cov_whitened = np.cov(X_whitened_yours.T, bias=True)
-print(f"Is covariance close to identity? {np.allclose(cov_whitened, np.eye(n_features), atol=0.1)}")
-print(f"Max deviation from identity: {np.abs(cov_whitened - np.eye(n_features)).max():.6f}")
 
-# 4. Standard PCA Whitening (correct formula)
-print("\n" + "=" * 80)
-print("2. STANDARD PCA WHITENING")
-print("=" * 80)
+def whitened_covariance(math, X, kernel, bias):
+    """Covariance of exactly what the pipeline computes, minus the L2 step."""
+    Z = (X + bias).dot(kernel)
+    return math._covariance(Z)
 
-# Standard formula: X_white = (X - μ) @ V @ D^(-1/2)
-pca_matrix_standard = v @ diagw  # V @ D^(-1/2)
-X_whitened_standard = X_centered @ pca_matrix_standard
 
-print(f"Transformed shape: {X_whitened_standard.shape}")
-print(f"Transformed mean: {X_whitened_standard.mean(axis=0)[:3]}...")
-print(f"Transformed std: {X_whitened_standard.std(axis=0)[:3]}...")
+def report(name, cov, k):
+    """Print and grade a whitened covariance against the identity."""
+    deviation = np.abs(cov - np.eye(k)).max()
+    ok = deviation < TOLERANCE
+    print(f"  {'PASS' if ok else 'FAIL'}  {name:<24} "
+          f"max|Cov(z) - I| = {deviation:.2e}")
+    return ok
 
-cov_whitened_std = np.cov(X_whitened_standard.T, bias=True)
-print(f"Is covariance close to identity? {np.allclose(cov_whitened_std, np.eye(n_features), atol=0.1)}")
-print(f"Max deviation from identity: {np.abs(cov_whitened_std - np.eye(n_features)).max():.6f}")
 
-# 5. ZCA Whitening (Your implementation)
-print("\n" + "=" * 80)
-print("3. YOUR ZCA WHITENING IMPLEMENTATION")
-print("=" * 80)
+def main():
+    math = KernelMath()
+    X = make_correlated_data()
+    sigma = math._covariance(X)
+    failures = []
 
-zca_matrix = v @ diagw @ v.T  # V @ D^(-1/2) @ V^T
-X_zca_yours = X_centered @ zca_matrix
+    print("=" * 78)
+    print("WHITENING VALIDATION - pipeline convention  z = (x + bias) . kernel")
+    print("=" * 78)
+    print(f"\nData: {X.shape[0]} samples x {X.shape[1]} features, "
+          f"epsilon = {math.epsilon:g}")
+    print(f"Condition number of Sigma: {np.linalg.cond(sigma):.1f}")
 
-print(f"Transformed shape: {X_zca_yours.shape}")
-print(f"Transformed mean: {X_zca_yours.mean(axis=0)[:3]}...")
-print(f"Transformed std: {X_zca_yours.std(axis=0)[:3]}...")
+    print("\n1. Full-rank kernels must satisfy W^T Sigma W = I")
+    print("-" * 78)
+    for label, method in TECHNIQUES.items():
+        kernel, bias = getattr(math, method)([X])
+        assert kernel.ndim == 2, f"{label}: kernel collapsed to shape {kernel.shape}"
+        cov = whitened_covariance(math, X, kernel, bias)
+        if not report(label, cov, N_FEATURES):
+            failures.append(label)
 
-cov_zca = np.cov(X_zca_yours.T, bias=True)
-print(f"Is covariance close to identity? {np.allclose(cov_zca, np.eye(n_features), atol=0.1)}")
-print(f"Max deviation from identity: {np.abs(cov_zca - np.eye(n_features)).max():.6f}")
+    print(f"\n2. Truncated to {TARGET_DIM} of {N_FEATURES} components, must give I_k")
+    print("-" * 78)
+    for label, method in TECHNIQUES.items():
+        kernel, bias = getattr(math, method)([X])
+        kernel = kernel[:, :TARGET_DIM]
+        cov = whitened_covariance(math, X, kernel, bias)
+        if not report(label, cov, TARGET_DIM):
+            failures.append(f"{label} (truncated)")
 
-# 6. Compare with sklearn PCA (NOT whitening)
-print("\n" + "=" * 80)
-print("4. SKLEARN PCA (NO WHITENING - for reference)")
-print("=" * 80)
+    print("\n3. Compression ordering - Kessy et al. Propositions 3 and 4")
+    print("-" * 78)
+    print("  The per-component integration measure must be non-increasing, or")
+    print("  truncation does not keep the leading components. Proposition 3 scores")
+    print("  PCA-type kernels on cross-covariance, Proposition 4 scores the")
+    print("  scale-invariant cor variants on cross-correlation.")
+    sd_x = np.sqrt(np.diag(sigma))
+    for label, scale_invariant in (('svd (BERT-Whitening)', False),
+                                   ('pca', False),
+                                   ('pca-cor', True)):
+        kernel, bias = getattr(math, TECHNIQUES[label])([X])
+        cross = kernel.T.dot(sigma)                     # F = W^T Sigma  (Eq. 6)
+        if scale_invariant:
+            cross = cross / sd_x                        # Psi = F V^-1/2 (Eq. 7)
+        measure = (cross ** 2).sum(axis=1)
+        monotone = np.all(np.diff(measure) <= 1e-8)
+        symbol = 'psi' if scale_invariant else 'phi'
+        print(f"  {'PASS' if monotone else 'FAIL'}  {label:<24} "
+              f"{symbol} = {np.array2string(measure[:4], precision=2)} ...")
+        if not monotone:
+            failures.append(f"{label} (ordering)")
 
-pca_sklearn = PCA(n_components=n_features)
-X_pca = pca_sklearn.fit_transform(X)
+    print("\n4. Basis stability across splits - Kessy et al. sec. 2 and 5")
+    print("-" * 78)
+    print("  Eigenvectors are defined only up to a sign, so a kernel fitted on one")
+    print("  split must not be an arbitrary sign flip of one fitted on another.")
+    print("  Compares the leading 3 columns, where eigenvalues are well separated")
+    print("  and the component order is stable between splits.")
+    half = len(X) // 2
+    for label in ('pca', 'zca', 'svd (BERT-Whitening)'):
+        k_a, _ = getattr(math, TECHNIQUES[label])([X[:half]])
+        k_b, _ = getattr(math, TECHNIQUES[label])([X[half:]])
+        k_a, k_b = k_a[:, :3], k_b[:, :3]
+        aligned = np.abs(k_a - k_b).max()
+        flipped = np.abs(k_a + k_b).max()
+        stable = aligned < flipped
+        print(f"  {'PASS' if stable else 'FAIL'}  {label:<24} "
+              f"max|Wa - Wb| = {aligned:.2e} vs max|Wa + Wb| = {flipped:.2e}")
+        if not stable:
+            failures.append(f"{label} (sign stability)")
 
-print(f"Transformed shape: {X_pca.shape}")
-print(f"Transformed mean: {X_pca.mean(axis=0)[:3]}...")
-print(f"Transformed std: {X_pca.std(axis=0)[:3]}...")
+    print("\n5. Regression check - the pre-fix PCA orientation")
+    print("-" * 78)
+    print("  Lambda^-1/2 V^T is correct for the COLUMN convention z = W x, but the")
+    print("  pipeline uses row vectors. Applied there it must fail the constraint;")
+    print("  if this passes, the orientation fix has been reverted.")
+    w, v = math._sorted_eigh(sigma)
+    w = np.maximum(w, math.epsilon)
+    diagw = np.diag(1.0 / np.sqrt(w + math.epsilon))
+    transposed_kernel = diagw.dot(v.T)                  # the old _compute_kernel_bias_pca
+    mu = X.mean(axis=0, keepdims=True)
+    cov_bad = whitened_covariance(math, X, transposed_kernel, -mu)
+    deviation = np.abs(cov_bad - np.eye(N_FEATURES)).max()
+    if deviation > TOLERANCE:
+        print(f"  PASS  transposed PCA kernel     max|Cov(z) - I| = {deviation:.2e} "
+              f"(correctly rejected)")
+    else:
+        print(f"  FAIL  transposed PCA kernel is being accepted as whitening")
+        failures.append('regression: transposed PCA accepted')
 
-cov_pca = np.cov(X_pca.T, bias=True)
-print(f"Is covariance diagonal? {np.allclose(cov_pca, np.diag(np.diag(cov_pca)), atol=0.1)}")
-print(f"Is covariance identity? {np.allclose(cov_pca, np.eye(n_features), atol=0.1)}")
-print(f"Note: sklearn PCA decorrelates but doesn't normalize variance")
+    print("\n" + "=" * 78)
+    if failures:
+        print(f"FAILED ({len(failures)}): " + ", ".join(failures))
+    else:
+        print("All whitening kernels satisfy W^T Sigma W = I in the pipeline's own")
+        print("convention, are ordered for compression, and are sign-stable.")
+    print("=" * 78)
+    return 1 if failures else 0
 
-# 7. sklearn PCA with whiten=True
-print("\n" + "=" * 80)
-print("5. SKLEARN PCA WITH whiten=True")
-print("=" * 80)
 
-pca_sklearn_white = PCA(n_components=n_features, whiten=True)
-X_pca_white = pca_sklearn_white.fit_transform(X)
-
-print(f"Transformed shape: {X_pca_white.shape}")
-print(f"Transformed mean: {X_pca_white.mean(axis=0)[:3]}...")
-print(f"Transformed std: {X_pca_white.std(axis=0)[:3]}...")
-
-cov_pca_white = np.cov(X_pca_white.T, bias=True)
-print(f"Is covariance close to identity? {np.allclose(cov_pca_white, np.eye(n_features), atol=0.1)}")
-print(f"Max deviation from identity: {np.abs(cov_pca_white - np.eye(n_features)).max():.6f}")
-
-# 8. Comparison
-print("\n" + "=" * 80)
-print("COMPARISON & VALIDATION")
-print("=" * 80)
-
-print("\n✓ Your PCA whitening is mathematically correct!")
-print(f"  - Decorrelates features: Yes")
-print(f"  - Unit variance: Yes")
-print(f"  - Covariance ≈ Identity: {np.allclose(cov_whitened_std, np.eye(n_features), atol=0.1)}")
-
-print("\n✓ Your ZCA whitening is mathematically correct!")
-print(f"  - Decorrelates features: Yes")
-print(f"  - Unit variance: Yes")
-print(f"  - Covariance ≈ Identity: {np.allclose(cov_zca, np.eye(n_features), atol=0.1)}")
-print(f"  - Preserves data structure better than PCA whitening")
-
-print("\n⚠ Difference from sklearn PCA:")
-print(f"  - sklearn PCA (default): Decorrelates but preserves variance")
-print(f"  - sklearn PCA (whiten=True): Similar to your PCA whitening")
-print(f"  - Your implementation does PCA WHITENING, not just PCA")
-
-print("\n📊 Key Insight:")
-print("  Your 'PCA' method should be called 'PCA Whitening' to avoid confusion.")
-print("  It's mathematically valid but serves a different purpose than sklearn's PCA.")
-
-print("\n" + "=" * 80)
+if __name__ == '__main__':
+    raise SystemExit(main())
