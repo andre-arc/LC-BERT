@@ -91,7 +91,7 @@ def setup_dataloaders(args, tokenizer=None):
         extract_model, extract_tokenizer, a, b_ = load_extraction_model(args)
         train_dataset_path = args['train_set_path']
         sampled_train_df = get_subset_data(train_dataset_path, subset_percentage)
-        train_dataset = args['dataset_class'](args['device'], sampled_train_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args['dim_technique'], lowercase=args["lower"], no_special_token=args['no_special_token'])
+        train_dataset = args['dataset_class'](args['device'], sampled_train_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args.get('dim_technique'), lowercase=args["lower"], no_special_token=args['no_special_token'])
         train_loader = args['dataloader_class'](dataset=train_dataset, batch_size=args['train_batch_size'], shuffle=False)
 
         # Apply the whitening kernel fitted on train to the other splits, so the
@@ -103,12 +103,12 @@ def setup_dataloaders(args, tokenizer=None):
 
         valid_dataset_path = args['valid_set_path']
         sampled_valid_df = get_subset_data(valid_dataset_path, subset_percentage)
-        valid_dataset = args['dataset_class'](args['device'], sampled_valid_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args['dim_technique'], whitening_params=shared_whitening, lowercase=args["lower"], no_special_token=args['no_special_token'])
+        valid_dataset = args['dataset_class'](args['device'], sampled_valid_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args.get('dim_technique'), whitening_params=shared_whitening, lowercase=args["lower"], no_special_token=args['no_special_token'])
         valid_loader = args['dataloader_class'](dataset=valid_dataset, batch_size=args['valid_batch_size'], shuffle=False)
 
         test_dataset_path = args['test_set_path']
         sampled_test_df = get_subset_data(test_dataset_path, subset_percentage)
-        test_dataset = args['dataset_class'](args['device'], sampled_test_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args['dim_technique'], whitening_params=shared_whitening, lowercase=args["lower"], no_special_token=args['no_special_token'])
+        test_dataset = args['dataset_class'](args['device'], sampled_test_df, extract_tokenizer, extract_model, args['max_seq_len'], dim_technique=args.get('dim_technique'), whitening_params=shared_whitening, lowercase=args["lower"], no_special_token=args['no_special_token'])
         test_loader = args['dataloader_class'](dataset=test_dataset, batch_size=args['valid_batch_size'], shuffle=False)
     
     return train_loader, valid_loader, test_loader
