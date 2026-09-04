@@ -2,7 +2,10 @@ name: lc-bert
 channels:
   - conda-forge
   - pytorch
-  - defaults
+  # `nodefaults` keeps the Anaconda repo.anaconda.com channels out of the solve.
+  # conda >= 25 refuses to solve against them until their Terms of Service are
+  # accepted, and every package below is available on conda-forge anyway.
+  - nodefaults
 
 dependencies:
   # Python
@@ -15,6 +18,13 @@ dependencies:
 
   # Machine Learning
   - scikit-learn=1.0.2
+
+  # BLAS/LAPACK implementation - do not remove.
+  # Left unpinned, conda-forge resolves liblapack to an MKL 2024 build whose
+  # exports numpy 1.22.4 cannot delay-load: np.linalg.eigh / svd then kill the
+  # interpreter with 0xC06D007F (procedure not found) and no traceback, which
+  # breaks every whitening run at kernel computation.
+  - libblas=*=*openblas
 
   # Visualization
   - matplotlib=3.5.1
@@ -37,7 +47,10 @@ dependencies:
       - transformers==4.25.1
       - tokenizers==0.13.2
       - sentencepiece==0.1.97
-      - pathlib
+      # NOTE: `pathlib` was removed from this list. It is the Python-2-era PyPI
+      # backport of the stdlib module (stdlib since 3.4); it fails to build with
+      # modern setuptools and its failure aborted the whole `conda env create`,
+      # rolling back the entire environment.
 
       # HTTP Requests (for Telegram notifications)
       - requests==2.28.1

@@ -55,6 +55,7 @@ def get_parser():
     parser.add_argument("--no_special_token", action='store_true', help="not adding special token as the input")
     parser.add_argument("--lower", action='store_true', help="lower case")
     parser.add_argument("--subset_percentage", default=100, help="subset percentage of dataset")
+    parser.add_argument("--per_split_whitening", action='store_true', help="fit a separate whitening kernel on each split (pre-2025 behaviour); default is to fit on train and reuse it for valid/test")
 
     args = vars(parser.parse_args())
     print_opts(args)
@@ -171,6 +172,21 @@ def append_dataset_args(args):
         args['test_set_path'] = './dataset/ag-news/test.csv'
         args['vocab_path']  = ""
         args['k_fold'] = 1
+    elif args['dataset'] == "ag-news-bert-whitening-pca-cor":
+        args['task'] = 'sequence_classification'
+        args['num_labels'] = BertWhiteningDataset.NUM_LABELS
+        args['dataset_class'] = BertWhiteningDataset
+        args['dataloader_class'] = BertWhiteningDataLoader
+        args['extract_model'] = 'bert-base-uncased'
+        args['dim_technique'] = 'pca-cor'
+        args['forward_fn'] = modified_forward_word_classification
+        args['metrics_fn'] = news_categorization_metrics_fn
+        args['valid_criterion'] = 'F1'
+        args['train_set_path'] = './dataset/ag-news/train.csv'
+        args['valid_set_path'] = './dataset/ag-news/valid.csv'
+        args['test_set_path'] = './dataset/ag-news/test.csv'
+        args['vocab_path']  = ""
+        args['k_fold'] = 1
     elif args['dataset'] == "ag-news-bert-whitening-pca-svd":
         args['task'] = 'sequence_classification'
         args['num_labels'] = BertWhiteningDataset.NUM_LABELS
@@ -255,6 +271,21 @@ def append_dataset_args(args):
         args['dataloader_class'] = BertWhiteningDataLoader
         args['extract_model'] = 'roberta-base'
         args['dim_technique'] = 'pca'
+        args['forward_fn'] = modified_forward_word_classification
+        args['metrics_fn'] = news_categorization_metrics_fn
+        args['valid_criterion'] = 'F1'
+        args['train_set_path'] = './dataset/ag-news/train.csv'
+        args['valid_set_path'] = './dataset/ag-news/valid.csv'
+        args['test_set_path'] = './dataset/ag-news/test.csv'
+        args['vocab_path']  = ""
+        args['k_fold'] = 1
+    elif args['dataset'] == "ag-news-roberta-whitening-pca-cor":
+        args['task'] = 'sequence_classification'
+        args['num_labels'] = BertWhiteningDataset.NUM_LABELS
+        args['dataset_class'] = BertWhiteningDataset
+        args['dataloader_class'] = BertWhiteningDataLoader
+        args['extract_model'] = 'roberta-base'
+        args['dim_technique'] = 'pca-cor'
         args['forward_fn'] = modified_forward_word_classification
         args['metrics_fn'] = news_categorization_metrics_fn
         args['valid_criterion'] = 'F1'

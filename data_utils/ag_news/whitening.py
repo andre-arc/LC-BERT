@@ -23,14 +23,18 @@ class BertWhiteningDataset(Dataset):
     NUM_LABELS = 4
     EPSILON = 1e-8  # Epsilon for numerical stability in whitening transformations
 
-    def __init__(self, device, dataset, tokenizer, model, max_len, dim_technique, epsilon=None, *args, **kwargs):
+    def __init__(self, device, dataset, tokenizer, model, max_len, dim_technique, epsilon=None,
+                 whitening_params=None, *args, **kwargs):
         self.device = device
         self.data = self.load_dataset(dataset)
         self.tokenizer = tokenizer
         self.model = model.to(self.device)
         # Use provided epsilon or fall back to class default
         self.epsilon = epsilon if epsilon is not None else self.EPSILON
-        self.vecs = self.Dim_reduction(dim_technique=dim_technique, max_len=max_len)
+        # (kernel, bias) fitted on this split, exposed so other splits can reuse it
+        self.whitening_params = None
+        self.vecs = self.Dim_reduction(dim_technique=dim_technique, max_len=max_len,
+                                       whitening_params=whitening_params)
         
     def __getitem__(self, index):
         data = self.data.loc[index,:]
@@ -110,6 +114,43 @@ class BertWhiteningDataset(Dataset):
         # Clip norms to prevent division by zero (min value: 1e-8)
         return vecs / np.clip(norms, 1e-8, np.inf)
         
+    def _covariance(self, vecs):
+        """
+        Biased (1/N) covariance estimate, matching Eq. (2) of the LC-BERT paper.
+
+        `np.cov` centers the data itself; `bias=True` selects the 1/N normalization
+        rather than numpy's default 1/(N-1).
+        """
+        return np.cov(vecs.T, rowvar=True, bias=True)
+
+    def _fix_signs(self, u):
+        """
+        Pin the sign of each eigenvector so the basis is reproducible.
+
+        Eigenvectors are only defined up to a sign, and different LAPACK builds -
+        or the same build on two different splits - return different column signs
+        (Kessy et al. 2018, sec. 2). Setting diag(U) > 0 selects the unique
+        transformation (ibid., sec. 5), which is what lets a kernel fitted on the
+        training split be applied meaningfully to validation and test embeddings.
+        """
+        signs = np.sign(np.diag(u))
+        signs[signs == 0] = 1.0
+        return u * signs
+
+    def _sorted_eigh(self, cov):
+        """
+        Symmetric eigendecomposition, eigenvalues descending, signs canonical.
+
+        `np.linalg.eigh` guarantees real output for a symmetric matrix but returns
+        eigenvalues in ASCENDING order. Both the LC-BERT paper (after Eq. 4) and
+        Kessy et al. (sec. 2) assume descending order, which is also what makes
+        truncation to the top `target_dim` components meaningful.
+        """
+        w, v = np.linalg.eigh(cov)
+        order = np.argsort(w)[::-1]
+        w, v = w[order], v[:, order]
+        return w, self._fix_signs(v)
+
     def _compute_kernel_bias_svd(self, vecs):
         """
         Calculate Kernel & Bias using SVD for whitening transformation.
@@ -119,12 +160,17 @@ class BertWhiteningDataset(Dataset):
         This method uses SVD to compute the whitening matrix that decorrelates
         the input features and normalizes their variance.
 
-        Based on standard BERT-whitening approach (Su et al., 2021).
+        Based on standard BERT-whitening approach (Su et al., 2021). Because the
+        transformation is applied to row vectors, this kernel U*S^(-1/2) is the
+        transpose of Kessy et al.'s W_PCA = S^(-1/2)*U^T, i.e. this branch already
+        implements textbook PCA whitening. `np.linalg.svd` returns singular values
+        in descending order, so the later top-k slice selects the leading components.
         """
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
-        cov = np.cov(vecs.T)
+        cov = self._covariance(vecs)
         u, s, vh = np.linalg.svd(cov)
+        u = self._fix_signs(u)
         # Standard whitening: W = U * Σ^(-1/2)
         # No inverse needed - this is the correct formulation
         W = np.dot(u, np.diag(1.0 / np.sqrt(s + self.epsilon)))
@@ -136,43 +182,95 @@ class BertWhiteningDataset(Dataset):
 
         Similar to SVD method but uses eigendecomposition directly.
         Note: SVD is generally more numerically stable.
+
+        `np.linalg.eig` (the general, non-symmetric solver) was returning unsorted
+        and potentially complex eigenvalues for this symmetric covariance matrix;
+        `_sorted_eigh` gives real values in descending order. The old
+        `inv((U·Λ^(1/2))^T)` reduces to `U·Λ^(-1/2)`, so this branch is equivalent
+        to `_compute_kernel_bias_svd` and is kept only for backwards compatibility.
         """
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
-        cov = np.cov(vecs.T)
+        cov = self._covariance(vecs)
 
         # Calculate Eigenvalues and Eigenvectors
-        s, u = np.linalg.eig(cov)
+        s, u = self._sorted_eigh(cov)
+        s = np.maximum(s, self.epsilon)
 
-        W = np.dot(u, np.diag(s**0.5))
-        W = np.linalg.inv(W.T)
+        W = np.dot(u, np.diag(1.0 / np.sqrt(s + self.epsilon)))
         return W, -mu
 
     def _compute_kernel_bias_pca(self, vecs):
         """
         Calculate Kernel & Bias using PCA-based whitening via eigendecomposition.
 
-        Computes whitening matrix using eigendecomposition of covariance matrix.
-        Adds epsilon (1e-5) for numerical stability.
+        Kessy et al. (2018) Eq. (9) gives W_PCA = Λ^(-1/2)·V^T for the column-vector
+        convention z = W·x. This pipeline applies the kernel to ROW vectors,
+        y = (x + bias).dot(kernel), so the kernel must be the transpose:
+
+            kernel = V·Λ^(-1/2)
+
+        Returning Λ^(-1/2)·V^T here instead (as the paper's Eq. 5 does, transplanted
+        from Kessy's column convention) violates the defining whitening constraint
+        W^T·W = Σ^(-1): it yields Λ^(-1) rather than V·Λ^(-1)·V^T. Columns are ordered
+        by descending eigenvalue, so slicing `kernel[:, :k]` keeps the top-k
+        components - the compression optimality of Kessy et al.'s Proposition 3.
         """
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
 
         # Covariance matrix estimation
-        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
+        covariance_matrix = self._covariance(vecs)
 
-        # This guarantees real eigenvalues and is more numerically stable
-        w, v = np.linalg.eigh(covariance_matrix)
-        
+        # Real eigenvalues, descending order, canonical eigenvector signs
+        w, v = self._sorted_eigh(covariance_matrix)
+
         # This handles numerical precision issues
         w = np.maximum(w, self.epsilon)
-        
+
         # Create diagonal matrix (now guaranteed to be real)
         diagw = np.diag(1.0 / np.sqrt(w + self.epsilon))
 
-        pca_matrix = np.dot(diagw, v.T)
+        # Row-vector convention: V·Λ^(-1/2), components down the columns
+        pca_matrix = np.dot(v, diagw)
 
         return pca_matrix, -mu
+
+    def _compute_kernel_bias_pca_cor(self, vecs):
+        """
+        Calculate Kernel & Bias using PCA-cor whitening (Kessy et al. 2018, Eq. 12).
+
+        PCA-cor whitens the *standardized* variables: it rotates by the eigenmatrix
+        of the CORRELATION matrix and scales by its eigenvalues, making the
+        transformation scale-invariant. Kessy et al. recommend it over plain PCA
+        whitening whenever the goal is maximal compression (their Proposition 4 and
+        Conclusion) - which is the goal here, since the 768-dim embedding is
+        truncated to `target_dim`.
+
+        Column convention: W = Θ^(-1/2)·G^T·V^(-1/2). Transposed for row vectors:
+
+            kernel = V^(-1/2)·G·Θ^(-1/2)
+
+        where V = diag(σ²) holds the feature variances, P = V^(-1/2)·Σ·V^(-1/2) is the
+        correlation matrix, and P = G·Θ·G^T its eigendecomposition.
+        """
+        vecs = np.concatenate(vecs, axis=0)
+        mu = vecs.mean(axis=0, keepdims=True)
+
+        covariance_matrix = self._covariance(vecs)
+
+        # Standardize: correlation matrix from the covariance matrix
+        sd = np.sqrt(np.maximum(np.diag(covariance_matrix), self.epsilon))
+        correlation_matrix = covariance_matrix / np.outer(sd, sd)
+
+        # Eigendecomposition of the correlation matrix, descending, signs canonical
+        theta, g = self._sorted_eigh(correlation_matrix)
+        theta = np.maximum(theta, self.epsilon)
+
+        diag_theta = np.diag(1.0 / np.sqrt(theta + self.epsilon))
+        pca_cor_matrix = np.dot(np.dot(np.diag(1.0 / sd), g), diag_theta)
+
+        return pca_cor_matrix, -mu
 
     def _compute_kernel_bias_pca_svd(self, vecs):
         """
@@ -180,19 +278,27 @@ class BertWhiteningDataset(Dataset):
 
         More numerically stable than eigendecomposition-based PCA.
         Uses SVD to compute the whitening transformation.
+
+        Previously this built `np.diag(s)` and then called `np.diag` on that 2-D
+        matrix, which EXTRACTS a diagonal rather than building one - collapsing the
+        kernel to a 1-D array and making `kernel[:, :target_dim]` raise IndexError.
+        The scaling is now built directly from the 1-D singular values, and the
+        kernel is transposed into the row-vector convention (see
+        `_compute_kernel_bias_pca`).
         """
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
 
         # Covariance matrix estimation
-        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
+        covariance_matrix = self._covariance(vecs)
 
         _, s, vh = np.linalg.svd(covariance_matrix)
+        v = self._fix_signs(vh.T)
 
-        diag_sigma = np.diag(s)
-        diag_sigma_inv = np.diag(1 / (diag_sigma**0.5 + self.epsilon))
+        diag_sigma_inv = np.diag(1.0 / np.sqrt(s + self.epsilon))
 
-        pca_matrix = np.dot(diag_sigma_inv, vh.T)
+        # Row-vector convention: V·Σ^(-1/2)
+        pca_matrix = np.dot(v, diag_sigma_inv)
 
         return pca_matrix, -mu
     
@@ -235,19 +341,26 @@ class BertWhiteningDataset(Dataset):
 
         Unlike PCA, ZCA preserves the structure of the original data better
         by rotating back to the original coordinate system.
+
+        W_ZCA = Σ^(-1/2) is symmetric, so - unlike PCA - it is unaffected by the
+        row/column convention, by eigenvalue ordering, and by eigenvector signs.
+        Note the trade-off: Kessy et al.'s Proposition 1 shows ZCA is optimal for
+        keeping the whitened variables SIMILAR to the originals, not for
+        compression, so slicing `kernel[:, :k]` keeps the first k original
+        embedding dimensions rather than the k most informative directions.
         """
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
 
         # Covariance matrix estimation
-        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
+        covariance_matrix = self._covariance(vecs)
 
-        # This guarantees real eigenvalues and is more numerically stable
-        w, v = np.linalg.eigh(covariance_matrix)
-        
+        # Real eigenvalues, descending order, canonical eigenvector signs
+        w, v = self._sorted_eigh(covariance_matrix)
+
         # This handles numerical precision issues
         w = np.maximum(w, self.epsilon)
-        
+
         # Create diagonal matrix (now guaranteed to be real)
         diagw = np.diag(1.0 / np.sqrt(w + self.epsilon))
 
@@ -262,20 +375,24 @@ class BertWhiteningDataset(Dataset):
 
         More numerically stable than eigendecomposition-based ZCA.
         Uses SVD to compute ZCA transformation: V * Σ^(-1/2) * V^T
+
+        Carried the same `np.diag`-on-a-2-D-matrix defect as
+        `_compute_kernel_bias_pca_svd`; the scaling is now built from the 1-D
+        singular values. The product is symmetric, so no transpose is needed.
         """
         vecs = np.concatenate(vecs, axis=0)
         mu = vecs.mean(axis=0, keepdims=True)
 
         # Covariance matrix estimation
-        covariance_matrix = np.cov(vecs.T, rowvar=True, bias=True)
+        covariance_matrix = self._covariance(vecs)
 
         _, s, vh = np.linalg.svd(covariance_matrix)
+        v = self._fix_signs(vh.T)
 
-        diag_sigma = np.diag(s)
-        diag_sigma_inv = np.diag(1 / (diag_sigma**0.5 + self.epsilon))
+        diag_sigma_inv = np.diag(1.0 / np.sqrt(s + self.epsilon))
 
-        # ZCA whitening transformation matrix
-        zca_matrix = np.dot(np.dot(vh, diag_sigma_inv), vh.T)
+        # ZCA whitening transformation matrix: V·Σ^(-1/2)·V^T
+        zca_matrix = np.dot(np.dot(v, diag_sigma_inv), v.T)
 
         return zca_matrix, -mu
 
@@ -349,7 +466,8 @@ class BertWhiteningDataset(Dataset):
         return vec
 
 
-    def Dim_reduction(self, max_len, dim_technique, pooling='first_last_avg', target_dim=256):
+    def Dim_reduction(self, max_len, dim_technique, pooling='first_last_avg', target_dim=256,
+                      whitening_params=None):
         """
         Extract features using BERT/RoBERTa and apply dimensionality reduction.
 
@@ -361,9 +479,15 @@ class BertWhiteningDataset(Dataset):
 
         Args:
             max_len: Maximum sequence length for tokenization
-            dim_technique: Whitening technique ('svd', 'eigen', 'zca', 'zca-svd', 'pca', 'pca-svd')
+            dim_technique: Whitening technique ('svd', 'eigen', 'zca', 'zca-svd', 'pca',
+                'pca-svd', 'pca-cor')
             pooling: Pooling strategy for combining token embeddings (default: 'first_last_avg')
             target_dim: Target dimensionality after reduction (default: 256)
+            whitening_params: Optional (kernel, bias) fitted on another split - normally
+                the training split. When supplied, no kernel is fitted here and the
+                supplied transformation is applied as-is, so all splits end up in the
+                same basis. When None (the default) the kernel is fitted on this
+                split's own embeddings, which is the original behaviour.
 
         Returns:
             numpy array: Whitened and dimensionally reduced embeddings
@@ -390,31 +514,44 @@ class BertWhiteningDataset(Dataset):
         if np.isnan(embeddings).any() or np.isinf(embeddings).any():
             raise ValueError("Input embeddings contain NaN or Inf values!")
 
-        # Compute kernel and bias based on selected technique
-        if dim_technique == 'svd':
-            kernel, bias = self._compute_kernel_bias_svd([vecs])
-        elif dim_technique == 'eigen':
-            kernel, bias = self._compute_kernel_bias_eigen([vecs])
-        elif dim_technique == 'zca':
-            kernel, bias = self._compute_kernel_bias_zca_base([vecs])
-        elif dim_technique == 'zca-svd':
-            kernel, bias = self._compute_kernel_bias_zca_svd([vecs])
-        elif dim_technique == 'pca':
-            kernel, bias = self._compute_kernel_bias_pca([vecs])
-        elif dim_technique == 'pca-svd':
-            kernel, bias = self._compute_kernel_bias_pca_svd([vecs])
+        if whitening_params is not None:
+            # Reuse the transformation fitted on another split (normally train), so
+            # every split lands in the same basis. Only the embeddings above are
+            # split-specific.
+            kernel, bias = whitening_params
+            print(f'\nReusing whitening kernel fitted on the training split: {kernel.shape}')
         else:
-            raise ValueError(f"Unknown dimensionality reduction technique: '{dim_technique}'. "
-                           f"Supported techniques: 'svd', 'eigen', 'zca', 'zca-svd', 'pca', 'pca-svd'")
-        
-        # ✅ CHECK 2: Validate kernel and bias
-        if np.isnan(kernel).any() or np.isinf(kernel).any():
-            raise ValueError(f"Kernel contains NaN: {np.isnan(kernel).any()} /Inf: {np.isinf(kernel).any()} for technique '{dim_technique}'!")
-        if np.isnan(bias).any() or np.isinf(bias).any():
-            raise ValueError(f"Bias contains NaN: {np.isnan(kernel).any()} /Inf: {np.isinf(kernel).any()} for technique '{dim_technique}'!")
-            
-        # Reduce dimensionality by selecting top components
-        kernel = kernel[:, :target_dim]
+            # Compute kernel and bias based on selected technique
+            if dim_technique == 'svd':
+                kernel, bias = self._compute_kernel_bias_svd([vecs])
+            elif dim_technique == 'eigen':
+                kernel, bias = self._compute_kernel_bias_eigen([vecs])
+            elif dim_technique == 'zca':
+                kernel, bias = self._compute_kernel_bias_zca_base([vecs])
+            elif dim_technique == 'zca-svd':
+                kernel, bias = self._compute_kernel_bias_zca_svd([vecs])
+            elif dim_technique == 'pca':
+                kernel, bias = self._compute_kernel_bias_pca([vecs])
+            elif dim_technique == 'pca-svd':
+                kernel, bias = self._compute_kernel_bias_pca_svd([vecs])
+            elif dim_technique == 'pca-cor':
+                kernel, bias = self._compute_kernel_bias_pca_cor([vecs])
+            else:
+                raise ValueError(f"Unknown dimensionality reduction technique: '{dim_technique}'. "
+                               f"Supported techniques: 'svd', 'eigen', 'zca', 'zca-svd', 'pca', "
+                               f"'pca-svd', 'pca-cor'")
+
+            # ✅ CHECK 2: Validate kernel and bias
+            if np.isnan(kernel).any() or np.isinf(kernel).any():
+                raise ValueError(f"Kernel contains NaN: {np.isnan(kernel).any()} /Inf: {np.isinf(kernel).any()} for technique '{dim_technique}'!")
+            if np.isnan(bias).any() or np.isinf(bias).any():
+                raise ValueError(f"Bias contains NaN: {np.isnan(bias).any()} /Inf: {np.isinf(bias).any()} for technique '{dim_technique}'!")
+
+            # Reduce dimensionality by selecting top components
+            kernel = kernel[:, :target_dim]
+
+        # Expose the transformation so the next split can reuse it
+        self.whitening_params = (kernel, bias)
 
         # Apply whitening transformation and normalize
         # This decorrelates features and makes covariance closer to identity matrix
