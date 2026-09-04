@@ -108,3 +108,4 @@ CLAUDE.md
 *.zip
 desktop.ini
 .claude/settings.local.json
+paper/*
